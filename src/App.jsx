@@ -324,7 +324,7 @@ export default function PimPamPofWeb() {
                             <TextArea
                                 value={invoer}
                                 onChange={setInvoer}
-                                placeholder={"Bijv: Wat is je lievelingsdier?,\nWat eet je graag?"}
+                                placeholder={"Bijv: Noem een dier,\nnoem een snoepje of snack"}
                             />
                             <div style={{ marginTop: 12 }}>
                                 <Row>
