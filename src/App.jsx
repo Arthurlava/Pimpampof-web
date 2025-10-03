@@ -153,4 +153,462 @@ const db = getDatabase(firebaseApp);
 
 /* ---------- utils: room code ---------- */
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math]()_
+function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+
+/* ---------- self-heal helper (presence moet bestaan én leeg zijn) ---------- */
+function computeHealInfo(data) {
+    const players = data.players ? Object.keys(data.players) : [];
+    const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
+    const offline = players.filter(pid => {
+        const conns = presence[pid];
+        return conns && typeof conns === "object" && Object.keys(conns).length === 0;
+    });
+
+    const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
+    const orderFiltered = order.filter(id => players.includes(id));
+    const hostOk = data.hostId && players.includes(data.hostId);
+    const turnOk = data.turn && players.includes(data.turn);
+
+    const mustHeal =
+        offline.length > 0 ||
+        orderFiltered.length !== order.length ||
+        !hostOk || !turnOk ||
+        players.length === 0;
+
+    return { players, offline, orderFiltered, mustHeal };
+}
+
+export default function PimPamPofWeb() {
+    const [vragen, setVragen] = useState(() => loadVragen());
+    const [invoer, setInvoer] = useState("");
+
+    const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
+    useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
+
+    const [playerId] = useState(() => getOrCreatePlayerId());
+
+    const [roomCodeInput, setRoomCodeInput] = useState("");
+    const [roomCode, setRoomCode] = useState("");
+    const [room, setRoom] = useState(null);
+    const [isHost, setIsHost] = useState(false);
+    const roomRef = useRef(null);
+
+    const letterRef = useRef(null);
+    const connIdRef = useRef(null); // presence-connection id
+
+    useEffect(() => { saveVragen(vragen); }, [vragen]);
+
+    /* --------- presence per room ---------- */
+    useEffect(() => {
+        if (!roomCode) return;
+        const connectedRef = ref(db, ".info/connected");
+        const unsub = onValue(connectedRef, snap => {
+            if (snap.val() === true) {
+                const connId = crypto.randomUUID();
+                connIdRef.current = connId;
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connId}`);
+                set(myConnRef, serverTimestamp());
+                onDisconnect(myConnRef).remove();
+            }
+        });
+        return () => {
+            if (connIdRef.current) {
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
+                remove(myConnRef).catch(() => { });
+                connIdRef.current = null;
+            }
+            if (unsub) unsub();
+        };
+    }, [roomCode, playerId]);
+
+    /* --------- room listeners + self-heal ---------- */
+    function attachRoomListener(code) {
+        if (roomRef.current) roomRef.current = null;
+        const r = ref(db, `rooms/${code}`);
+        roomRef.current = r;
+        onValue(r, (snap) => {
+            const data = snap.val() ?? null;
+            setRoom(data);
+            if (!data) return;
+
+            const { offline, mustHeal } = computeHealInfo(data);
+            if (!mustHeal) return;
+
+            runTransaction(ref(db, `rooms/${code}`), (d) => {
+                if (!d) return d;
+
+                if (d.players && d.presence) {
+                    for (const id of offline) { delete d.players[id]; }
+                }
+
+                const ids = d.players ? Object.keys(d.players) : [];
+                if (ids.length === 0) return null;
+
+                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
+                if (d.playersOrder.length === 0) d.playersOrder = ids;
+
+                if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
+                if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
+
+                return d;
+            });
+        });
+    }
+
+    function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
+
+    async function createRoom({ autoStart = false } = {}) {
+        const code = makeRoomCode();
+        const qs = getSeedQuestions();
+        const order = shuffle([...Array(qs.length).keys()]);
+        const playersOrder = [playerId];
+        const obj = {
+            createdAt: serverTimestamp(),
+            hostId: playerId,
+            players: { [playerId]: { name: playerName || "Host", joinedAt: serverTimestamp() } },
+            playersOrder,
+            questions: qs,
+            order,
+            currentIndex: 0,
+            lastLetter: "?",
+            turn: playerId,
+            started: false,
+            version: 1
+        };
+        await set(ref(db, `rooms/${code}`), obj);
+        setIsHost(true);
+        setRoomCode(code);
+        attachRoomListener(code);
+
+        if (autoStart) {
+            await update(ref(db, `rooms/${code}`), {
+                started: true,
+                currentIndex: 0,
+                lastLetter: "?",
+                turn: playersOrder[0]
+            });
+            setTimeout(() => letterRef.current?.focus(), 0);
+        }
+    }
+
+    async function joinRoom() {
+        const code = (roomCodeInput || "").trim().toUpperCase();
+        if (!code) { alert("Voer een room code in."); return; }
+        const r = ref(db, `rooms/${code}`);
+        const snap = await get(r);
+        if (!snap.exists()) { alert("Room niet gevonden."); return; }
+
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+            if (!data.players) data.players = {};
+            data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
+            if (!data.playersOrder) data.playersOrder = [];
+            if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
+            if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
+            if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
+            return data;
+        });
+
+        setIsHost(false);
+        setRoomCode(code);
+        attachRoomListener(code);
+    }
+
+    async function startSpelOnline() {
+        if (!room || !isHost) { return; }
+        await update(ref(db, `rooms/${roomCode}`), {
+            started: true,
+            currentIndex: 0,
+            lastLetter: "?",
+            turn: room.playersOrder?.[0] || room.hostId
+        });
+        setTimeout(() => letterRef.current?.focus(), 0);
+    }
+
+    async function submitLetterOnline(letter) {
+        if (!room) return;
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+
+            if (!data.players || !data.players[data.turn]) {
+                const ids = data.players ? Object.keys(data.players) : [];
+                if (ids.length === 0) return null;
+                data.playersOrder = (Array.isArray(data.playersOrder) ? data.playersOrder : ids).filter(id => ids.includes(id));
+                data.turn = data.playersOrder[0] || ids[0];
+            }
+
+            if (data.turn !== playerId) return;
+            const listLen = (data.order?.length ?? 0);
+            if (listLen === 0) return data;
+
+            data.lastLetter = letter;
+            data.currentIndex = (data.currentIndex + 1) % listLen;
+
+            if (Array.isArray(data.playersOrder) && data.playersOrder.length > 0) {
+                data.playersOrder = data.playersOrder.filter(id => data.players && data.players[id]);
+                const i = data.playersOrder.indexOf(data.turn);
+                const next = (i >= 0 ? (i + 1) % data.playersOrder.length : 0);
+                data.turn = data.playersOrder[next];
+            }
+            return data;
+        });
+    }
+
+    /* ---------- Kick een speler ---------- */
+    async function kickPlayer(targetId) {
+        if (!roomCode || !targetId) return;
+        if (!confirm("Speler verwijderen?")) return;
+
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+            if (!data.players || !data.players[targetId]) return data;
+
+            delete data.players[targetId];
+
+            if (Array.isArray(data.playersOrder)) {
+                data.playersOrder = data.playersOrder.filter(id => id !== targetId && data.players && data.players[id]);
+            }
+
+            const ids = data.players ? Object.keys(data.players) : [];
+            if (ids.length === 0) return null;
+
+            if (!data.hostId || data.hostId === targetId || !data.players[data.hostId]) {
+                data.hostId = data.playersOrder?.[0] || ids[0];
+            }
+
+            if (!data.turn || data.turn === targetId || !data.players[data.turn]) {
+                data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
+            }
+
+            return data;
+        });
+
+        // presence best-effort opruimen
+        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
+    }
+
+    async function leaveRoom() {
+        if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+
+            if (data.players && data.players[playerId]) delete data.players[playerId];
+            if (Array.isArray(data.playersOrder)) {
+                data.playersOrder = data.playersOrder.filter(id => id !== playerId && data.players && data.players[id]);
+            }
+
+            const ids = data.players ? Object.keys(data.players) : [];
+            if (ids.length === 0) return null;
+
+            if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder?.[0] || ids[0];
+            if (!data.turn || !data.players[data.turn] || data.turn === playerId) {
+                data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
+            }
+
+            return data;
+        });
+
+        if (connIdRef.current) {
+            const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
+            remove(myConnRef).catch(() => { });
+            connIdRef.current = null;
+        }
+
+        setRoom(null);
+        setRoomCode("");
+        setIsHost(false);
+    }
+
+    /* ---------- UI helpers ---------- */
+    const isOnline = !!roomCode;
+    const isMyTurn = isOnline && room?.turn === playerId;
+    const onlineQuestion = isOnline && room
+        ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
+        : null;
+
+    function onLetterChanged(e) {
+        const val = (e.target.value ?? "").trim().toUpperCase();
+        if (val.length === 1) {
+            if (isOnline && isMyTurn) submitLetterOnline(val);
+            e.target.value = "";
+        }
+    }
+
+    function copyRoomCode() {
+        if (!roomCode) return;
+        navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd."));
+    }
+
+    function voegVragenToe() {
+        const items = splitInput(invoer);
+        if (items.length === 0) return;
+        setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]);
+        setInvoer("");
+    }
+    function verwijderVraag(id) { setVragen((prev) => prev.filter((v) => v.id !== id)); }
+    async function kopieerAlle() {
+        const tekst = vragen.map((v) => v.tekst).join(",\n");
+        try { await navigator.clipboard.writeText(tekst); alert("Alle vragen zijn gekopieerd."); }
+        catch {
+            const ta = document.createElement("textarea"); ta.value = tekst; document.body.appendChild(ta);
+            ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("Alle vragen zijn gekopieerd.");
+        }
+    }
+
+    return (
+        <>
+            <GlobalStyle />
+            <div style={styles.wrap}>
+                <header style={styles.header}>
+                    <h1 style={styles.h1}>PimPamPof</h1>
+
+                    {/* bovenste controls */}
+                    <Row>
+                        {/* Naamveld alleen vóór start */}
+                        {!room?.started && (
+                            <input
+                                style={styles.input}
+                                placeholder="Jouw naam"
+                                value={playerName}
+                                onChange={e => setPlayerName(e.target.value)}
+                            />
+                        )}
+
+                        {!isOnline ? (
+                            <>
+                                <Button onClick={() => createRoom({ autoStart: true })}>Solo starten</Button>
+                                <Button variant="alt" onClick={() => createRoom({ autoStart: false })}>Room aanmaken</Button>
+                                <input style={styles.input} placeholder="Room code (bv. 82631)" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
+                                <Button variant="alt" onClick={joinRoom}>Join</Button>
+                            </>
+                        ) : (
+                            <>
+                                {!room?.started && (
+                                    <span className="badge">Room: <b>{roomCode}</b>
+                                        <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
+                                    </span>
+                                )}
+                                <Button variant="alt" onClick={leaveRoom}>Leave</Button>
+                            </>
+                        )}
+                    </Row>
+
+                    {/* start/ status */}
+                    <Row>
+                        {isOnline && isHost && !room?.started && (
+                            <Button onClick={startSpelOnline}>Start spel (online)</Button>
+                        )}
+                        {isOnline && !isHost && !room?.started && (
+                            <span className="muted">Wachten op host…</span>
+                        )}
+                        {isOnline && room?.started && (
+                            <span className="muted">Spel gestart — room code blijft zichtbaar voor joiners.</span>
+                        )}
+                    </Row>
+                </header>
+
+                {/* beheer vragen op beginscherm */}
+                {(!isOnline || (isOnline && isHost && !room?.started)) && (
+                    <>
+                        <Section title="Nieuwe vragen (gescheiden met , of enter)">
+                            <TextArea
+                                value={invoer}
+                                onChange={setInvoer}
+                                placeholder={"Bijv: Wat is je lievelingsdier?,\nWat eet je graag?"}
+                            />
+                            <div style={{ marginTop: 12 }}>
+                                <Row>
+                                    <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
+                                    <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
+                                </Row>
+                            </div>
+                        </Section>
+
+                        <Section title="Huidige vragen">
+                            {vragen.length === 0 ? (
+                                <p style={{ opacity: 0.7 }}>Nog geen vragen toegevoegd.</p>
+                            ) : (
+                                <ul style={styles.list}>
+                                    {vragen.map((v) => (
+                                        <li key={v.id} style={styles.li}>
+                                            <div style={styles.liText}>{v.tekst}</div>
+                                            <DangerButton onClick={() => verwijderVraag(v.id)}>❌</DangerButton>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                        </Section>
+                    </>
+                )}
+
+                {/* speelveld */}
+                {isOnline && room?.started && (
+                    <Section>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                            <div className="badge">Room: <b>{roomCode}</b>
+                                <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
+                            </div>
+                            <div style={{ fontSize: 18 }}>
+                                Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
+                            </div>
+                            <div style={{ fontSize: 22, minHeight: "3rem" }}>
+                                {onlineQuestion ?? "Vraag komt hier..."}
+                            </div>
+                            <input
+                                ref={letterRef}
+                                type="text"
+                                inputMode="text"
+                                maxLength={1}
+                                onChange={onLetterChanged}
+                                placeholder={isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt"}
+                                disabled={!isMyTurn}
+                                style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
+                            />
+                            {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
+                        </div>
+                    </Section>
+                )}
+
+                {/* spelers onder speelveld (met Kick) */}
+                {isOnline && room?.players && (
+                    <Section title="Spelers">
+                        <ul style={styles.list}>
+                            {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+                                .filter((id) => !!room.players[id])
+                                .map((id, idx) => {
+                                    const p = room.players[id];
+                                    const active = room.turn === id;
+                                    return (
+                                        <li
+                                            key={id}
+                                            style={{
+                                                ...styles.li,
+                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
+                                            }}
+                                        >
+                                            <div style={styles.liText}>
+                                                {idx + 1}. {p?.name || "Speler"}
+                                            </div>
+                                            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                                                {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
+                                                {id !== playerId && (
+                                                    <DangerButton onClick={() => kickPlayer(id)}>Kick</DangerButton>
+                                                )}
+                                            </div>
+                                        </li>
+                                    );
+                                })}
+                        </ul>
+                    </Section>
+                )}
+
+                <footer style={styles.foot}>
+                    {isOnline ? "Online modus via Firebase Realtime Database (presence + self-heal). Spelers kunnen kicken." : "Maak een room aan of kies Solo starten."}
+                </footer>
+            </div>
+        </>
+    );
+}
