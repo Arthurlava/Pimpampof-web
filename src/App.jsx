@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
-    getDatabase, ref, onValue, set, update, get, runTransaction, serverTimestamp
+    getDatabase, ref, onValue, set, update, get, runTransaction, serverTimestamp,
+    onDisconnect, remove
 } from "firebase/database";
 
 const STORAGE_KEY = "ppp.vragen";
@@ -93,8 +94,8 @@ const styles = {
     input: { padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none" },
     textarea: { width: "100%", minHeight: 120, resize: "vertical", padding: 12, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", boxSizing: "border-box" },
     list: { listStyle: "none", padding: 0, margin: 0 },
-    li: { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: "8px 0", borderTop: "1px solid rgba(255,255,255,0.1)" },
-    liText: { lineHeight: 1.4, textAlign: "center" },
+    li: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.1)" },
+    liText: { lineHeight: 1.4, textAlign: "left" },
     letterInput: { marginTop: 8, width: 200, textAlign: "center", padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", fontSize: 16, boxSizing: "border-box" },
     foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
 };
@@ -120,7 +121,7 @@ function Button({ children, onClick, variant }) { let s = { ...styles.btn }; if 
 function DangerButton({ children, onClick }) { return <button onClick={onClick} style={styles.btnDanger}>{children}</button>; }
 function TextArea({ value, onChange, placeholder }) { return <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={styles.textarea} />; }
 
-/* ---------- FIREBASE INIT (vul je config in of gebruik .env) ---------- */
+/* ---------- FIREBASE INIT ---------- */
 const firebaseConfig = {
     apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
     authDomain: "pimpampof-aec32.firebaseapp.com",
@@ -137,6 +138,29 @@ const db = getDatabase(firebaseApp);
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
 
+/* Heal-functie: repareer room als er mensen weg zijn of host/turn ongeldig is */
+function needsHeal(data) {
+    const players = data.players ? Object.keys(data.players) : [];
+    const presentIds = new Set(
+        Object.entries(data.presence || {})
+            .filter(([pid, conns]) => conns && typeof conns === "object" && Object.keys(conns).length > 0)
+            .map(([pid]) => pid)
+    );
+    const offline = players.filter(pid => !presentIds.has(pid));
+    const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
+    const orderFiltered = order.filter(id => players.includes(id));
+    const hostOk = data.hostId && players.includes(data.hostId);
+    const turnOk = data.turn && players.includes(data.turn);
+    return {
+        offline,
+        orderFiltered,
+        mustHeal:
+            offline.length > 0 ||
+            orderFiltered.length !== order.length ||
+            !hostOk || !turnOk || players.length === 0
+    };
+}
+
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
@@ -150,20 +174,75 @@ export default function PimPamPofWeb() {
     const roomRef = useRef(null);
 
     const letterRef = useRef(null);
+    const connIdRef = useRef(null); // presence-connection id
 
     useEffect(() => { saveVragen(vragen); }, [vragen]);
 
-    /* --------- room listeners ---------- */
+    /* --------- presence registreren per room ---------- */
+    useEffect(() => {
+        if (!roomCode) return;
+        const connectedRef = ref(db, ".info/connected");
+        const unsub = onValue(connectedRef, snap => {
+            if (snap.val() === true) {
+                // nieuwe verbinding
+                const connId = crypto.randomUUID();
+                connIdRef.current = connId;
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connId}`);
+                set(myConnRef, serverTimestamp());
+                onDisconnect(myConnRef).remove();
+            }
+        });
+        // cleanup bij unmount/room verlaten
+        return () => {
+            if (connIdRef.current) {
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
+                remove(myConnRef).catch(() => { });
+                connIdRef.current = null;
+            }
+        };
+    }, [roomCode, playerId]);
+
+    /* --------- room listeners + self-heal ---------- */
     function attachRoomListener(code) {
         if (roomRef.current) roomRef.current = null;
         const r = ref(db, `rooms/${code}`);
         roomRef.current = r;
-        onValue(r, (snap) => { setRoom(snap.val() ?? null); });
+        onValue(r, (snap) => {
+            const data = snap.val() ?? null;
+            setRoom(data);
+
+            if (!data) return;
+
+            const { offline, orderFiltered, mustHeal } = needsHeal(data);
+            if (!mustHeal) return;
+
+            runTransaction(ref(db, `rooms/${code}`), (d) => {
+                if (!d) return d;
+
+                // verwijder offline spelers
+                if (d.players) {
+                    for (const id of offline) { delete d.players[id]; }
+                }
+
+                // filter order op bestaande spelers
+                const ids = d.players ? Object.keys(d.players) : [];
+                if (ids.length === 0) return null; // room opruimen als niemand meer over is
+
+                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
+                if (d.playersOrder.length === 0) d.playersOrder = ids;
+
+                // host herstellen
+                if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
+
+                // beurt herstellen
+                if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
+
+                return d;
+            });
+        });
     }
 
-    function getSeedQuestions() {
-        return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
-    }
+    function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
     async function createRoom({ autoStart = false } = {}) {
         const code = makeRoomCode();
@@ -212,6 +291,10 @@ export default function PimPamPofWeb() {
             data.players[playerId] = { name: playerName || "Speler", joinedAt: Date.now() };
             if (!data.playersOrder) data.playersOrder = [];
             if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId); // join mid-game OK
+            // als turn ontbreekt of ongeldig → zet op eerste
+            if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
+            // als host ontbreekt → zet op eerste
+            if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             return data;
         });
 
@@ -236,12 +319,26 @@ export default function PimPamPofWeb() {
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
+
+            // als huidige beurt-speler niet meer bestaat → heal snel
+            if (!data.players || !data.players[data.turn]) {
+                const ids = data.players ? Object.keys(data.players) : [];
+                if (ids.length === 0) return null;
+                data.playersOrder = (Array.isArray(data.playersOrder) ? data.playersOrder : ids).filter(id => ids.includes(id));
+                data.turn = data.playersOrder[0] || ids[0];
+            }
+
             if (data.turn !== playerId) return; // niet jouw beurt
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
+
             data.lastLetter = letter;
             data.currentIndex = (data.currentIndex + 1) % listLen;
+
+            // volgende speler
             if (Array.isArray(data.playersOrder) && data.playersOrder.length > 0) {
+                // playersOrder eerst opschonen voor zekerheid
+                data.playersOrder = data.playersOrder.filter(id => data.players && data.players[id]);
                 const i = data.playersOrder.indexOf(data.turn);
                 const next = (i >= 0 ? (i + 1) % data.playersOrder.length : 0);
                 data.turn = data.playersOrder[next];
@@ -250,7 +347,43 @@ export default function PimPamPofWeb() {
         });
     }
 
-    function leaveRoom() {
+    async function leaveRoom() {
+        if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+
+            // speler verwijderen
+            if (data.players && data.players[playerId]) {
+                delete data.players[playerId];
+            }
+            if (Array.isArray(data.playersOrder)) {
+                data.playersOrder = data.playersOrder.filter(id => id !== playerId && data.players && data.players[id]);
+            }
+
+            const ids = data.players ? Object.keys(data.players) : [];
+            if (ids.length === 0) return null; // room opruimen
+
+            // host herstellen indien nodig
+            if (!data.hostId || !data.players[data.hostId]) {
+                data.hostId = data.playersOrder?.[0] || ids[0];
+            }
+
+            // beurt herstellen indien nodig
+            if (!data.turn || !data.players[data.turn] || data.turn === playerId) {
+                data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
+            }
+
+            return data;
+        });
+
+        // presence cleanup (best effort)
+        if (connIdRef.current) {
+            const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
+            remove(myConnRef).catch(() => { });
+            connIdRef.current = null;
+        }
+
         setRoom(null);
         setRoomCode("");
         setIsHost(false);
@@ -273,8 +406,7 @@ export default function PimPamPofWeb() {
 
     function copyRoomCode() {
         if (!roomCode) return;
-        const tekst = roomCode;
-        navigator.clipboard.writeText(tekst).then(() => alert("Room code gekopieerd."));
+        navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd."));
     }
 
     function voegVragenToe() {
@@ -336,7 +468,7 @@ export default function PimPamPofWeb() {
                     </Row>
                 </header>
 
-                {/* VRAAGBEHEER: weer zichtbaar op beginscherm (zoals je vroeg) */}
+                {/* VRAAGBEHEER op beginscherm */}
                 {(!isOnline || (isOnline && isHost && !room?.started)) && (
                     <>
                         <Section title="Nieuwe vragen (gescheiden met , of enter)">
@@ -348,9 +480,7 @@ export default function PimPamPofWeb() {
                             <div style={{ marginTop: 12 }}>
                                 <Row>
                                     <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
-                                    <Button variant="alt" onClick={kopieerAlle}>
-                                        Kopieer alle vragen
-                                    </Button>
+                                    <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
                                 </Row>
                             </div>
                         </Section>
@@ -374,62 +504,64 @@ export default function PimPamPofWeb() {
 
                 {/* speelveld */}
                 {isOnline && room?.started && (
-                    <Section>
-                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                            <div className="badge">Room: <b>{roomCode}</b>
-                                <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
+                    <>
+                        <Section>
+                            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                                <div className="badge">Room: <b>{roomCode}</b>
+                                    <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
+                                </div>
+                                <div style={{ fontSize: 18 }}>
+                                    Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
+                                </div>
+                                <div style={{ fontSize: 22, minHeight: "3rem" }}>
+                                    {onlineQuestion ?? "Vraag komt hier..."}
+                                </div>
+                                <input
+                                    ref={letterRef}
+                                    type="text"
+                                    inputMode="text"
+                                    maxLength={1}
+                                    onChange={onLetterChanged}
+                                    placeholder={isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt"}
+                                    disabled={!isMyTurn}
+                                    style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
+                                />
+                                {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
                             </div>
-                            <div style={{ fontSize: 18 }}>
-                                Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
-                            </div>
-                            <div style={{ fontSize: 22, minHeight: "3rem" }}>
-                                {onlineQuestion ?? "Vraag komt hier..."}
-                            </div>
-                            <input
-                                ref={letterRef}
-                                type="text"
-                                inputMode="text"
-                                maxLength={1}
-                                onChange={onLetterChanged}
-                                placeholder={isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt"}
-                                disabled={!isMyTurn}
-                                style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
-                            />
-                            {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
-                        </div>
-                    </Section>
-                )}
-                {/* spelers onder speelveld */}
-                {isOnline && room?.started && room?.players && (
-                    <Section title="Spelers">
-                        <ul style={styles.list}>
-                            {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
-                                .filter((id) => !!room.players[id])
-                                .map((id, idx) => {
-                                    const p = room.players[id];
-                                    const active = room.turn === id;
-                                    return (
-                                        <li
-                                            key={id}
-                                            style={{
-                                                ...styles.li,
-                                                justifyContent: "space-between",
-                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
-                                            }}
-                                        >
-                                            <div style={styles.liText}>
-                                                {idx + 1}. {p?.name || "Speler"}
-                                            </div>
-                                            {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
-                                        </li>
-                                    );
-                                })}
-                        </ul>
-                    </Section>
+                        </Section>
+
+                        {/* spelers onder speelveld */}
+                        {room?.players && (
+                            <Section title="Spelers">
+                                <ul style={styles.list}>
+                                    {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+                                        .filter((id) => !!room.players[id])
+                                        .map((id, idx) => {
+                                            const p = room.players[id];
+                                            const active = room.turn === id;
+                                            return (
+                                                <li
+                                                    key={id}
+                                                    style={{
+                                                        ...styles.li,
+                                                        ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
+                                                    }}
+                                                >
+                                                    <div style={styles.liText}>
+                                                        {idx + 1}. {p?.name || "Speler"}
+                                                    </div>
+                                                    {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
+                                                </li>
+                                            );
+                                        })}
+                                </ul>
+                            </Section>
+                        )}
+                    </>
                 )}
 
                 <footer style={styles.foot}>
-                    {isOnline ? "Online modus via Firebase Realtime Database." : "Maak een room aan of kies Solo starten."}
+                    {isOnline ? "Online modus via Firebase Realtime Database (met auto-herstel bij leavers)." : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
         </>
