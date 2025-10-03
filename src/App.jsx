@@ -417,7 +417,14 @@ export default function PimPamPofWeb() {
 
                     {/* bovenste controls */}
                     <Row>
-                        <input style={styles.input} placeholder="Jouw naam" value={playerName} onChange={e => setPlayerName(e.target.value)} />
+                        {!room?.started && (
+                            <input
+                                style={styles.input}
+                                placeholder="Jouw naam"
+                                value={playerName}
+                                onChange={e => setPlayerName(e.target.value)}
+                            />
+                        )}
                         {!isOnline ? (
                             <>
                                 <Button onClick={() => createRoom({ autoStart: true })}>Solo starten</Button>
