@@ -312,9 +312,11 @@ export default function PimPamPofWeb() {
                             </>
                         ) : (
                             <>
-                                <span className="badge">Room: <b>{roomCode}</b>
-                                    <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
-                                </span>
+                                {!room?.started && (
+                                    <span className="badge">Room: <b>{roomCode}</b>
+                                        <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
+                                    </span>
+                                )}
                                 <Button variant="alt" onClick={leaveRoom}>Leave</Button>
                             </>
                         )}
