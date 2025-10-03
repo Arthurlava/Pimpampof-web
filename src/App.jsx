@@ -26,6 +26,13 @@ const GlobalStyle = () => (
       float: none !important;
     }
     input, button, textarea { font-family: inherit; }
+    .badge {
+      display:inline-flex; align-items:center; gap:8px;
+      padding:6px 10px; border-radius:999px;
+      background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
+      font-size: 12px;
+    }
+    .muted { color: rgba(255,255,255,0.7); font-size:12px; }
   `}</style>
 );
 
@@ -88,7 +95,7 @@ const styles = {
   list: { listStyle: "none", padding: 0, margin: 0 },
   li: { display: "flex", alignItems: "center", justifyContent: "center", gap: 12, padding: "8px 0", borderTop: "1px solid rgba(255,255,255,0.1)" },
   liText: { lineHeight: 1.4, textAlign: "center" },
-  letterInput: { marginTop: 8, width: 160, textAlign: "center", padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", fontSize: 16, boxSizing: "border-box" },
+  letterInput: { marginTop: 8, width: 200, textAlign: "center", padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", fontSize: 16, boxSizing: "border-box" },
   foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
 };
 
@@ -113,7 +120,7 @@ function Button({ children, onClick, variant }) { let s={...styles.btn}; if(vari
 function DangerButton({ children, onClick }) { return <button onClick={onClick} style={styles.btnDanger}>{children}</button>; }
 function TextArea({ value, onChange, placeholder }) { return <textarea value={value} onChange={(e)=>onChange(e.target.value)} placeholder={placeholder} style={styles.textarea}/>; }
 
-/* ---------- FIREBASE INIT (vul je config in) ---------- */
+/* ---------- FIREBASE INIT (vul je config in of gebruik .env) ---------- */
 const firebaseConfig = {
   apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
   authDomain: "pimpampof-aec32.firebaseapp.com",
@@ -123,7 +130,6 @@ const firebaseConfig = {
   messagingSenderId: "872484746189",
   appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
 };
-
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
@@ -132,41 +138,22 @@ const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len=5){ let s=""; for(let i=0;i<len;i++) s+=CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]; return s; }
 
 export default function PimPamPofWeb() {
-  // singleplayer
   const [vragen, setVragen] = useState(() => loadVragen());
   const [invoer, setInvoer] = useState("");
-  const [spelModus, setSpelModus] = useState(false);
-  const [lastLetter, setLastLetter] = useState("?");
-  const [index, setIndex] = useState(-1);
-  const shuffledLocal = useMemo(() => shuffle(vragen), [vragen]);
-  const letterRef = useRef(null);
-
-  // multiplayer
-  const [online, setOnline] = useState(false);
   const [playerName, setPlayerName] = useState("");
   const [playerId] = useState(() => crypto.randomUUID());
+
+  const [roomCodeInput, setRoomCodeInput] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [room, setRoom] = useState(null);
   const [isHost, setIsHost] = useState(false);
   const roomRef = useRef(null);
 
+  const letterRef = useRef(null);
+
   useEffect(() => { saveVragen(vragen); }, [vragen]);
 
-  /* ---------- singleplayer acties ---------- */
-  function startSpelLocal() {
-    if (vragen.length === 0) { alert("Geen vragen beschikbaar."); return; }
-    setSpelModus(true); setLastLetter("?"); setIndex(0); setTimeout(()=>letterRef.current?.focus(),0);
-  }
-  function stopSpelLocal() { setSpelModus(false); setIndex(-1); setLastLetter("?"); }
-  function voegVragenToe() {
-    const items = splitInput(invoer); if (items.length === 0) return;
-    setVragen((prev)=>[...prev,...items.map((tekst)=>({id:crypto.randomUUID(),tekst}))]); setInvoer("");
-  }
-  function verwijderVraag(id){ setVragen((prev)=>prev.filter((v)=>v.id!==id)); }
-  async function kopieerAlle(){ const tekst=vragen.map(v=>v.tekst).join(",\n"); try{ await navigator.clipboard.writeText(tekst); alert("Alle vragen zijn gekopieerd."); }catch{ const ta=document.createElement("textarea"); ta.value=tekst; document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("Alle vragen zijn gekopieerd."); } }
-  function onLetterChangedLocal(e){ const val=(e.target.value??"").trim().toUpperCase(); if(val.length===1){ setLastLetter(val); e.target.value=""; setIndex(i=>(i+1)%shuffledLocal.length); } }
-
-  /* ---------- multiplayer acties ---------- */
+  /* --------- room listeners ---------- */
   function attachRoomListener(code){
     if(roomRef.current) roomRef.current=null;
     const r = ref(db, `rooms/${code}`);
@@ -174,9 +161,13 @@ export default function PimPamPofWeb() {
     onValue(r, (snap)=>{ setRoom(snap.val() ?? null); });
   }
 
-  async function createRoom(){
+  function getSeedQuestions(){
+    return (vragen.length>0 ? vragen.map(v=>v.tekst) : DEFAULT_VRAGEN);
+  }
+
+  async function createRoom({ autoStart=false } = {}){
     const code = makeRoomCode();
-    const qs = (vragen.length>0 ? vragen.map(v=>v.tekst) : DEFAULT_VRAGEN);
+    const qs = getSeedQuestions();
     const order = shuffle([...Array(qs.length).keys()]);
     const playersOrder = [playerId];
     const obj = {
@@ -195,13 +186,23 @@ export default function PimPamPofWeb() {
     await set(ref(db, `rooms/${code}`), obj);
     setIsHost(true);
     setRoomCode(code);
-    setOnline(true);
     attachRoomListener(code);
+
+    if (autoStart) {
+      await update(ref(db, `rooms/${code}`), {
+        started: true,
+        currentIndex: 0,
+        lastLetter: "?",
+        turn: playersOrder[0]
+      });
+      setTimeout(()=>letterRef.current?.focus(),0);
+    }
   }
 
   async function joinRoom(){
-    if(!roomCode) { alert("Voer een room code in."); return; }
-    const r = ref(db, `rooms/${roomCode}`);
+    const code = (roomCodeInput || "").trim().toUpperCase();
+    if(!code){ alert("Voer een room code in."); return; }
+    const r = ref(db, `rooms/${code}`);
     const snap = await get(r);
     if(!snap.exists()){ alert("Room niet gevonden."); return; }
 
@@ -210,19 +211,24 @@ export default function PimPamPofWeb() {
       if(!data.players) data.players = {};
       data.players[playerId] = { name: playerName || "Speler", joinedAt: Date.now() };
       if(!data.playersOrder) data.playersOrder = [];
-      if(!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
+      if(!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId); // join mid-game OK
       return data;
     });
 
     setIsHost(false);
-    setOnline(true);
-    attachRoomListener(roomCode);
+    setRoomCode(code);
+    attachRoomListener(code);
   }
 
   async function startSpelOnline(){
     if(!room || !isHost){ return; }
-    const r = ref(db, `rooms/${roomCode}`);
-    await update(r, { started: true, currentIndex: 0, lastLetter: "?", turn: room.playersOrder?.[0] || room.hostId });
+    await update(ref(db, `rooms/${roomCode}`), {
+      started: true,
+      currentIndex: 0,
+      lastLetter: "?",
+      turn: room.playersOrder?.[0] || room.hostId
+    });
+    setTimeout(()=>letterRef.current?.focus(),0);
   }
 
   async function submitLetterOnline(letter){
@@ -245,24 +251,45 @@ export default function PimPamPofWeb() {
   }
 
   function leaveRoom(){
-    setOnline(false);
     setRoom(null);
     setRoomCode("");
     setIsHost(false);
   }
 
   /* ---------- UI helpers ---------- */
-  const isMyTurn = online && room?.turn === playerId;
-  const onlineQuestion = online && room
+  const isOnline = !!roomCode;
+  const isMyTurn = isOnline && room?.turn === playerId;
+  const onlineQuestion = isOnline && room
     ? room.questions?.[ room.order?.[room.currentIndex ?? 0] ?? 0 ] ?? "Vraag komt hier..."
     : null;
 
   function onLetterChanged(e){
     const val=(e.target.value??"").trim().toUpperCase();
     if(val.length===1){
-      if(online){ if(isMyTurn) submitLetterOnline(val); }
-      else { onLetterChangedLocal(e); }
+      if(isOnline && isMyTurn) submitLetterOnline(val);
       e.target.value="";
+    }
+  }
+
+  function copyRoomCode(){
+    if(!roomCode) return;
+    const tekst = roomCode;
+    navigator.clipboard.writeText(tekst).then(()=>alert("Room code gekopieerd."));
+  }
+
+  function voegVragenToe() {
+    const items = splitInput(invoer);
+    if (items.length === 0) return;
+    setVragen((prev)=>[...prev, ...items.map((tekst)=>({ id: crypto.randomUUID(), tekst }))]);
+    setInvoer("");
+  }
+  function verwijderVraag(id){ setVragen((prev)=>prev.filter((v)=>v.id!==id)); }
+  async function kopieerAlle(){
+    const tekst = vragen.map((v) => v.tekst).join(",\n");
+    try { await navigator.clipboard.writeText(tekst); alert("Alle vragen zijn gekopieerd."); }
+    catch {
+      const ta=document.createElement("textarea"); ta.value=tekst; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("Alle vragen zijn gekopieerd.");
     }
   }
 
@@ -272,36 +299,43 @@ export default function PimPamPofWeb() {
       <div style={styles.wrap}>
         <header style={styles.header}>
           <h1 style={styles.h1}>PimPamPof</h1>
+
+          {/* bovenste controls */}
           <Row>
-            {!online ? (
+            <input style={styles.input} placeholder="Jouw naam" value={playerName} onChange={e=>setPlayerName(e.target.value)} />
+            {!isOnline ? (
               <>
-                <input style={styles.input} placeholder="Jouw naam" value={playerName} onChange={e=>setPlayerName(e.target.value)} />
-                <Button variant="alt" onClick={createRoom}>Room aanmaken</Button>
-                <input style={styles.input} placeholder="Room code (bv. 82631)" value={roomCode} onChange={e=>setRoomCode(e.target.value.toUpperCase())} />
+                <Button onClick={()=>createRoom({ autoStart:true })}>Solo starten</Button>
+                <Button variant="alt" onClick={()=>createRoom({ autoStart:false })}>Room aanmaken</Button>
+                <input style={styles.input} placeholder="Room code (bv. 82631)" value={roomCodeInput} onChange={e=>setRoomCodeInput(e.target.value.toUpperCase())} />
                 <Button variant="alt" onClick={joinRoom}>Join</Button>
               </>
             ) : (
               <>
-                <span>Room: <b>{roomCode}</b></span>
+                <span className="badge">Room: <b>{roomCode}</b>
+                  <button onClick={copyRoomCode} style={{...styles.btn, padding:"4px 10px"}}>Kopieer</button>
+                </span>
                 <Button variant="alt" onClick={leaveRoom}>Leave</Button>
               </>
             )}
           </Row>
+
+          {/* start/ status */}
           <Row>
-            {!online ? (
-              !spelModus
-                ? <Button onClick={startSpelLocal}>Start spel (offline)</Button>
-                : <Button variant="stop" onClick={stopSpelLocal}>Stop spel</Button>
-            ) : (
-              isHost && !room?.started
-                ? <Button onClick={startSpelOnline}>Start spel (online)</Button>
-                : <span>{room?.started ? "Spel gestart" : "Wachten op host..."}</span>
+            {isOnline && isHost && !room?.started && (
+              <Button onClick={startSpelOnline}>Start spel (online)</Button>
+            )}
+            {isOnline && !isHost && !room?.started && (
+              <span className="muted">Wachten op host…</span>
+            )}
+            {isOnline && room?.started && (
+              <span className="muted">Spel gestart — room code blijft zichtbaar voor joiners.</span>
             )}
           </Row>
         </header>
 
-        {/* spelerslijst online */}
-        {online && room?.players && (
+        {/* spelerslijst */}
+        {isOnline && room?.players && (
           <Section title="Spelers">
             <ul style={styles.list}>
               {Object.entries(room.players).map(([id, p]) => (
@@ -315,8 +349,8 @@ export default function PimPamPofWeb() {
           </Section>
         )}
 
-        {/* beheer vragen (offline, of online vóór start door host) */}
-        {(!online || (online && isHost && !room?.started)) && (
+        {/* beheer vragen (alleen host en alleen vóór start) */}
+        {isOnline && isHost && !room?.started && (
           <>
             <Section title="Nieuwe vragen (gescheiden met , of enter)">
               <TextArea
@@ -327,7 +361,9 @@ export default function PimPamPofWeb() {
               <div style={{ marginTop: 12 }}>
                 <Row>
                   <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
-                  <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
+                  <Button variant="alt" onClick={kopieerAlle}>
+                    Kopieer alle vragen
+                  </Button>
                 </Row>
               </div>
             </Section>
@@ -350,15 +386,17 @@ export default function PimPamPofWeb() {
         )}
 
         {/* speelveld */}
-        {( (!online && spelModus) || (online && room?.started) ) && (
+        {isOnline && room?.started && (
           <Section>
             <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:12 }}>
+              <div className="badge">Room: <b>{roomCode}</b>
+                <button onClick={copyRoomCode} style={{...styles.btn, padding:"4px 10px", marginLeft:8}}>Kopieer</button>
+              </div>
               <div style={{ fontSize: 18 }}>
-                Laatste letter: <span style={{ fontWeight: 700 }}>{ online ? (room?.lastLetter ?? "?") : lastLetter }</span>
+                Laatste letter: <span style={{ fontWeight: 700 }}>{ room?.lastLetter ?? "?" }</span>
               </div>
               <div style={{ fontSize: 22, minHeight: "3rem" }}>
-                { online ? (onlineQuestion ?? "Vraag komt hier...") :
-                  (index >= 0 && shuffledLocal.length>0 ? shuffledLocal[index].tekst : "Vraag komt hier...") }
+                { onlineQuestion ?? "Vraag komt hier..." }
               </div>
               <input
                 ref={letterRef}
@@ -366,16 +404,17 @@ export default function PimPamPofWeb() {
                 inputMode="text"
                 maxLength={1}
                 onChange={onLetterChanged}
-                placeholder={ online ? (isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt") : "Typ een letter..." }
-                disabled={ online ? !isMyTurn : false }
-                style={{ ...styles.letterInput, opacity: online && !isMyTurn ? 0.5 : 1 }}
+                placeholder={ isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt" }
+                disabled={ !isMyTurn }
+                style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
               />
+              {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
             </div>
           </Section>
         )}
 
         <footer style={styles.foot}>
-          {online ? "Online modus via Firebase Realtime Database." : "Offline modus (localStorage)."}
+          {isOnline ? "Online modus via Firebase Realtime Database." : "Maak een room aan of kies Solo starten."}
         </footer>
       </div>
     </>
