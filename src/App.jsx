@@ -1,3 +1,4 @@
+// src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import {
@@ -115,6 +116,22 @@ function saveVragen(vragen) { localStorage.setItem(STORAGE_KEY, JSON.stringify(v
 function splitInput(invoer) { return invoer.split(/[\n,]/g).map((s) => s.trim()).filter((s) => s.length > 0); }
 function shuffle(array) { const a = array.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
 
+/* ---------- persistente speler-id + (optioneel) naam ---------- */
+const PID_KEY = "ppp.playerId";
+function getOrCreatePlayerId() {
+    try {
+        const existing = localStorage.getItem(PID_KEY);
+        if (existing) return existing;
+        const id = crypto.randomUUID();
+        localStorage.setItem(PID_KEY, id);
+        return id;
+    } catch {
+        return crypto.randomUUID();
+    }
+}
+const NAME_KEY = "ppp.playerName";
+
+/* ---------- kleine UI helpers ---------- */
 function Section({ title, children }) { return (<div style={styles.section}>{title && <h2 style={styles.sectionTitle}>{title}</h2>}{children}</div>); }
 function Row({ children }) { return <div style={styles.row}>{children}</div>; }
 function Button({ children, onClick, variant }) { let s = { ...styles.btn }; if (variant === "alt") s = { ...s, ...styles.btnAlt }; if (variant === "stop") s = { ...s, ...styles.btnStop }; return <button onClick={onClick} style={s}>{children}</button>; }
@@ -138,33 +155,47 @@ const db = getDatabase(firebaseApp);
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
 
-/* ---------- self-heal helper ---------- */
-/* Belangrijk: alleen 'offline' als presence key BESTAAT én leeg is. */
+/* ---------- self-heal helper (met grace) ---------- */
 function computeHealInfo(data) {
     const players = data.players ? Object.keys(data.players) : [];
     const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
+    const now = Date.now();
+    const GRACE_MS = 4000;
+
     const offline = players.filter(pid => {
         const conns = presence[pid];
-        if (!conns || typeof conns !== "object") return false; // nog geen presence => niet meteen offline
-        return Object.keys(conns).length === 0; // expliciet 0 verbindingen => offline
+        const missingOrEmpty = !conns || typeof conns !== "object" || Object.keys(conns).length === 0;
+        if (!missingOrEmpty) return false;
+
+        const joinedAt = data.players[pid]?.joinedAt;
+        const joinedNum = typeof joinedAt === "number" ? joinedAt : 0;
+        const age = joinedNum ? (now - joinedNum) : GRACE_MS + 1;
+
+        return age > GRACE_MS;
     });
+
     const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
     const orderFiltered = order.filter(id => players.includes(id));
     const hostOk = data.hostId && players.includes(data.hostId);
     const turnOk = data.turn && players.includes(data.turn);
+
     const mustHeal =
         offline.length > 0 ||
         orderFiltered.length !== order.length ||
         !hostOk || !turnOk ||
         players.length === 0;
+
     return { players, offline, orderFiltered, mustHeal };
 }
 
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
-    const [playerName, setPlayerName] = useState("");
-    const [playerId] = useState(() => crypto.randomUUID());
+
+    const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
+    useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
+
+    const [playerId] = useState(() => getOrCreatePlayerId());
 
     const [roomCodeInput, setRoomCodeInput] = useState("");
     const [roomCode, setRoomCode] = useState("");
@@ -200,7 +231,7 @@ export default function PimPamPofWeb() {
         };
     }, [roomCode, playerId]);
 
-    /* --------- listener + self-heal ---------- */
+    /* --------- room listeners + self-heal ---------- */
     function attachRoomListener(code) {
         if (roomRef.current) roomRef.current = null;
         const r = ref(db, `rooms/${code}`);
@@ -216,19 +247,16 @@ export default function PimPamPofWeb() {
             runTransaction(ref(db, `rooms/${code}`), (d) => {
                 if (!d) return d;
 
-                // 1) verwijder offline spelers (alleen met expliciet lege presence)
                 if (d.players && d.presence) {
                     for (const id of offline) { delete d.players[id]; }
                 }
 
                 const ids = d.players ? Object.keys(d.players) : [];
-                if (ids.length === 0) return null; // niemand meer -> room weg
+                if (ids.length === 0) return null;
 
-                // 2) fix order
                 d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
                 if (d.playersOrder.length === 0) d.playersOrder = ids;
 
-                // 3) host/turn herstellen
                 if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
                 if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
 
@@ -283,9 +311,9 @@ export default function PimPamPofWeb() {
         await runTransaction(r, (data) => {
             if (!data) return data;
             if (!data.players) data.players = {};
-            data.players[playerId] = { name: playerName || "Speler", joinedAt: Date.now() };
+            data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
             if (!data.playersOrder) data.playersOrder = [];
-            if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId); // join mid-game OK
+            if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
             if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             return data;
@@ -313,7 +341,6 @@ export default function PimPamPofWeb() {
         await runTransaction(r, (data) => {
             if (!data) return data;
 
-            // turn speler weg? herstel eerst
             if (!data.players || !data.players[data.turn]) {
                 const ids = data.players ? Object.keys(data.players) : [];
                 if (ids.length === 0) return null;
@@ -321,14 +348,13 @@ export default function PimPamPofWeb() {
                 data.turn = data.playersOrder[0] || ids[0];
             }
 
-            if (data.turn !== playerId) return; // niet jouw beurt
+            if (data.turn !== playerId) return;
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
 
             data.lastLetter = letter;
             data.currentIndex = (data.currentIndex + 1) % listLen;
 
-            // volgende speler (order opschonen)
             if (Array.isArray(data.playersOrder) && data.playersOrder.length > 0) {
                 data.playersOrder = data.playersOrder.filter(id => data.players && data.players[id]);
                 const i = data.playersOrder.indexOf(data.turn);
@@ -351,7 +377,7 @@ export default function PimPamPofWeb() {
             }
 
             const ids = data.players ? Object.keys(data.players) : [];
-            if (ids.length === 0) return null; // room weg als niemand meer is
+            if (ids.length === 0) return null;
 
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder?.[0] || ids[0];
             if (!data.turn || !data.players[data.turn] || data.turn === playerId) {
@@ -417,6 +443,7 @@ export default function PimPamPofWeb() {
 
                     {/* bovenste controls */}
                     <Row>
+                        {/* Naamveld alleen vóór start */}
                         {!room?.started && (
                             <input
                                 style={styles.input}
@@ -425,6 +452,7 @@ export default function PimPamPofWeb() {
                                 onChange={e => setPlayerName(e.target.value)}
                             />
                         )}
+
                         {!isOnline ? (
                             <>
                                 <Button onClick={() => createRoom({ autoStart: true })}>Solo starten</Button>
@@ -551,7 +579,7 @@ export default function PimPamPofWeb() {
                 )}
 
                 <footer style={styles.foot}>
-                    {isOnline ? "Online modus via Firebase Realtime Database (met presence & self-heal)." : "Maak een room aan of kies Solo starten."}
+                    {isOnline ? "Online modus via Firebase Realtime Database (presence + self-heal + reload-safe)." : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
         </>
