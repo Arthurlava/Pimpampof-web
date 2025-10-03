@@ -399,6 +399,34 @@ export default function PimPamPofWeb() {
                         </div>
                     </Section>
                 )}
+                {/* spelers onder speelveld */}
+                {isOnline && room?.started && room?.players && (
+                    <Section title="Spelers">
+                        <ul style={styles.list}>
+                            {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+                                .filter((id) => !!room.players[id])
+                                .map((id, idx) => {
+                                    const p = room.players[id];
+                                    const active = room.turn === id;
+                                    return (
+                                        <li
+                                            key={id}
+                                            style={{
+                                                ...styles.li,
+                                                justifyContent: "space-between",
+                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
+                                            }}
+                                        >
+                                            <div style={styles.liText}>
+                                                {idx + 1}. {p?.name || "Speler"}
+                                            </div>
+                                            {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
+                                        </li>
+                                    );
+                                })}
+                        </ul>
+                    </Section>
+                )}
 
                 <footer style={styles.foot}>
                     {isOnline ? "Online modus via Firebase Realtime Database." : "Maak een room aan of kies Solo starten."}
