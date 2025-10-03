@@ -229,6 +229,9 @@ export default function PimPamPofWeb() {
         onValue(r, (snap) => {
             const data = snap.val() ?? null;
             setRoom(data);
+
+            setIsHost(!!data && data.hostId === playerId);
+
             if (!data) return;
 
             const { offline, mustHeal } = computeHealInfo(data);
@@ -244,7 +247,8 @@ export default function PimPamPofWeb() {
                 const ids = d.players ? Object.keys(d.players) : [];
                 if (ids.length === 0) return null;
 
-                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
+                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids)
+                    .filter(id => ids.includes(id));
                 if (d.playersOrder.length === 0) d.playersOrder = ids;
 
                 if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
@@ -254,6 +258,7 @@ export default function PimPamPofWeb() {
             });
         });
     }
+
 
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
@@ -576,11 +581,17 @@ export default function PimPamPofWeb() {
                 {isOnline && room?.players && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
-                            {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+                            {(
+                                Array.isArray(room.playersOrder)
+                                    ? room.playersOrder
+                                    : Object.keys(room.players)
+                            )
                                 .filter((id) => !!room.players[id])
                                 .map((id, idx) => {
                                     const p = room.players[id];
                                     const active = room.turn === id;
+                                    const showKick = id !== playerId; // 👉 altijd kickbaar behalve jezelf
+
                                     return (
                                         <li
                                             key={id}
@@ -591,10 +602,12 @@ export default function PimPamPofWeb() {
                                         >
                                             <div style={styles.liText}>
                                                 {idx + 1}. {p?.name || "Speler"}
+                                                {room.hostId === id && " (host)"}
                                             </div>
+
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                                 {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
-                                                {id !== playerId && (
+                                                {showKick && (
                                                     <DangerButton onClick={() => kickPlayer(id)}>Kick</DangerButton>
                                                 )}
                                             </div>
@@ -604,6 +617,7 @@ export default function PimPamPofWeb() {
                         </ul>
                     </Section>
                 )}
+
 
                 <footer style={styles.foot}>
                     {isOnline ? "Online modus via Firebase Realtime Database (presence + self-heal). Spelers kunnen kicken." : "Maak een room aan of kies Solo starten."}
