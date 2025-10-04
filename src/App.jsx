@@ -178,9 +178,10 @@ const firebaseConfig = {
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getDatabase(firebaseApp);
 
-/* ---------- utils: room code ---------- */
+/* ---------- utils ---------- */
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
 
 /* ---------- self-heal helper (presence moet bestaan én leeg zijn) ---------- */
 function computeHealInfo(data) {
@@ -221,17 +222,12 @@ export default function PimPamPofWeb() {
     const roomRef = useRef(null);
 
     const letterRef = useRef(null);
-    const connIdRef = useRef(null); // presence-connection id
+    const connIdRef = useRef(null);
 
-    // Dubble pof! UI state
+    // Dubble pof! UI
     const [pofShow, setPofShow] = useState(false);
     const [pofText, setPofText] = useState("Dubble pof!");
-
-    function triggerPof(text = "Dubble pof!") {
-        setPofText(text);
-        setPofShow(true);
-        setTimeout(() => setPofShow(false), 1200);
-    }
+    function triggerPof(text = "Dubble pof!") { setPofText(text); setPofShow(true); setTimeout(() => setPofShow(false), 1200); }
 
     useEffect(() => { saveVragen(vragen); }, [vragen]);
 
@@ -266,7 +262,7 @@ export default function PimPamPofWeb() {
         onValue(r, (snap) => {
             const data = snap.val() ?? null;
             setRoom(data);
-            setIsHost(!!data && data.hostId === playerId); // host-status uit serverstate
+            setIsHost(!!data && data.hostId === playerId);
             if (!data) return;
 
             const { offline, mustHeal } = computeHealInfo(data);
@@ -287,6 +283,11 @@ export default function PimPamPofWeb() {
 
                 if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
                 if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
+
+                if (d.jail) {
+                    // ruim jail-entries op voor spelers die niet meer bestaan
+                    for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
+                }
 
                 return d;
             });
@@ -311,6 +312,7 @@ export default function PimPamPofWeb() {
             lastLetter: "?",
             turn: playerId,
             started: false,
+            jail: {},            // <-- nieuw
             version: 1
         };
         await set(ref(db, `rooms/${code}`), obj);
@@ -342,6 +344,7 @@ export default function PimPamPofWeb() {
             data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
             if (!data.playersOrder) data.playersOrder = [];
             if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
+            if (!data.jail) data.jail = {};
             if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             return data;
@@ -363,12 +366,35 @@ export default function PimPamPofWeb() {
         setTimeout(() => letterRef.current?.focus(), 0);
     }
 
+    // Hulpfunctie: bepaal volgende speler met jilla-skip
+    function advanceTurnWithJail(data) {
+        const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
+            .filter((id) => data.players && data.players[id]);
+        if (ids.length === 0) return null;
+
+        if (!data.jail) data.jail = {};
+        let idx = Math.max(0, ids.indexOf(data.turn)); // start vanaf huidige turn
+        // zoek volgende beschikbare speler; spelers met jail>0 worden 1 afgeteld en overgeslagen
+        for (let tries = 0; tries < ids.length; tries++) {
+            idx = (idx + 1) % ids.length;
+            const cand = ids[idx];
+            const j = data.jail[cand] || 0;
+            if (j > 0) { data.jail[cand] = j - 1; continue; }
+            data.turn = cand;
+            return cand;
+        }
+        // fallback: als iedereen in jilla zat, kies degene na huidige (nu allemaal -1 gedaan)
+        data.turn = ids[(ids.indexOf(data.turn) + 1) % ids.length];
+        return data.turn;
+    }
+
     async function submitLetterOnline(letter) {
         if (!room) return;
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
 
+            // herstel turn als nodig
             if (!data.players || !data.players[data.turn]) {
                 const ids = data.players ? Object.keys(data.players) : [];
                 if (ids.length === 0) return null;
@@ -376,19 +402,42 @@ export default function PimPamPofWeb() {
                 data.turn = data.playersOrder[0] || ids[0];
             }
 
-            if (data.turn !== playerId) return;
+            if (data.turn !== playerId) return data;
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
 
-            data.lastLetter = letter;
-            data.currentIndex = (data.currentIndex + 1) % listLen;
+            // Dubble pof! check is client-side visueel (reeds gedaan vóór submit)
+            data.lastLetter = letter;                                // nieuwe startletter
+            data.currentIndex = (data.currentIndex + 1) % listLen;   // volgende vraag
+            if (!data.jail) data.jail = {};
 
-            if (Array.isArray(data.playersOrder) && data.playersOrder.length > 0) {
-                data.playersOrder = data.playersOrder.filter(id => data.players && data.players[id]);
-                const i = data.playersOrder.indexOf(data.turn);
-                const next = (i >= 0 ? (i + 1) % data.playersOrder.length : 0);
-                data.turn = data.playersOrder[next];
+            // volgende speler met jilla-regel
+            advanceTurnWithJail(data);
+
+            return data;
+        });
+    }
+
+    // --- JILLA: sla vraag over, hou lastLetter gelijk, zet jezelf in jilla (skip volgende beurt), beurt naar volgende speler
+    async function useJilla() {
+        if (!room) return;
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (data) => {
+            if (!data) return data;
+            if (!data.players || !data.players[data.turn]) return data;
+            if (data.turn !== playerId) return data;
+
+            const listLen = (data.order?.length ?? 0);
+            if (listLen > 0) {
+                data.currentIndex = (data.currentIndex + 1) % listLen;  // nieuwe vraag
             }
+            // lastLetter blijft hetzelfde
+            if (!data.jail) data.jail = {};
+            data.jail[playerId] = (data.jail[playerId] || 0) + 1;      // volgende beurt overslaan
+
+            // beurt naar volgende (met jilla-skip voor anderen)
+            advanceTurnWithJail(data);
+
             return data;
         });
     }
@@ -403,6 +452,7 @@ export default function PimPamPofWeb() {
             if (!data.players || !data.players[targetId]) return data;
 
             delete data.players[targetId];
+            if (data.jail && data.jail[targetId] != null) delete data.jail[targetId];
 
             if (Array.isArray(data.playersOrder)) {
                 data.playersOrder = data.playersOrder.filter(id => id !== targetId && data.players && data.players[id]);
@@ -432,6 +482,8 @@ export default function PimPamPofWeb() {
             if (!data) return data;
 
             if (data.players && data.players[playerId]) delete data.players[playerId];
+            if (data.jail && data.jail[playerId] != null) delete data.jail[playerId];
+
             if (Array.isArray(data.playersOrder)) {
                 data.playersOrder = data.playersOrder.filter(id => id !== playerId && data.players && data.players[id]);
             }
@@ -465,17 +517,13 @@ export default function PimPamPofWeb() {
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
 
-    function normalizeLetter(ch) {
-        return (ch ?? "").toString().trim().toUpperCase();
-    }
-
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
             if (isOnline && isMyTurn) {
-                // Bonus check vóór submit: als getypte letter gelijk is aan vereiste startletter → Dubble pof!
                 const required = normalizeLetter(room?.lastLetter);
                 if (required && required !== "?" && val === required) {
+                    // woord begon en eindigde op dezelfde letter -> bonus
                     triggerPof("Dubble pof!");
                 }
                 submitLetterOnline(val);
@@ -514,7 +562,6 @@ export default function PimPamPofWeb() {
 
                     {/* bovenste controls */}
                     <Row>
-                        {/* Naamveld alleen vóór start */}
                         {!room?.started && (
                             <input
                                 style={styles.input}
@@ -604,22 +651,32 @@ export default function PimPamPofWeb() {
                             <div style={{ fontSize: 22, minHeight: "3rem" }}>
                                 {onlineQuestion ?? "Vraag komt hier..."}
                             </div>
+
+                            {/* jouw letter-invoer */}
                             <input
                                 ref={letterRef}
                                 type="text"
                                 inputMode="text"
                                 maxLength={1}
                                 onChange={onLetterChanged}
-                                placeholder={isMyTurn ? "Jouw beurt, typ de laatste letter…" : "Niet jouw beurt"}
+                                placeholder={isMyTurn ? "Jouw beurt — typ de laatste letter…" : "Niet jouw beurt"}
                                 disabled={!isMyTurn}
                                 style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
                             />
+
+                            {/* JILLA knop */}
+                            {isMyTurn && (
+                                <div style={{ marginTop: 6 }}>
+                                    <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
+                                </div>
+                            )}
+
                             {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
                         </div>
                     </Section>
                 )}
 
-                {/* spelers onder speelveld (met Kick) */}
+                {/* spelers onder speelveld (incl. Jilla-badge en Kick) */}
                 {isOnline && room?.players && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
@@ -628,7 +685,8 @@ export default function PimPamPofWeb() {
                                 .map((id, idx) => {
                                     const p = room.players[id];
                                     const active = room.turn === id;
-                                    const showKick = id !== playerId; // iedereen mag anderen kicken
+                                    const jcount = (room.jail && room.jail[id]) || 0;
+                                    const showKick = id !== playerId;
                                     return (
                                         <li
                                             key={id}
@@ -638,7 +696,8 @@ export default function PimPamPofWeb() {
                                             }}
                                         >
                                             <div style={styles.liText}>
-                                                {idx + 1}. {p?.name || "Speler"}{room?.hostId === id ? " (host)" : ""}
+                                                {idx + 1}. {p?.name || "Speler"}{room?.hostId === id ? " (host)" : ""}{" "}
+                                                {jcount > 0 && <span className="badge">Jilla x{jcount}</span>}
                                             </div>
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                                 {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
@@ -654,7 +713,7 @@ export default function PimPamPofWeb() {
                 )}
 
                 <footer style={styles.foot}>
-                    {isOnline ? "Online modus via Firebase Realtime Database. Bonus: Dubble pof! bij begin=einde letter." : "Maak een room aan of kies Solo starten."}
+                    {isOnline ? "Online modus via Firebase Realtime Database. Bonus: Dubble pof! • Jilla: vraag overslaan, volgende beurt wordt geskipt." : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
 
