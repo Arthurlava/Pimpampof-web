@@ -8,7 +8,7 @@ import {
 
 const STORAGE_KEY = "ppp.vragen";
 
-/* --- GLOBALE CSS --- */
+/* --- GLOBALE CSS + Dubble pof! --- */
 const GlobalStyle = () => (
     <style>{`
     html, body, #root { height: 100%; }
@@ -35,6 +35,33 @@ const GlobalStyle = () => (
       font-size: 12px;
     }
     .muted { color: rgba(255,255,255,0.7); font-size:12px; }
+
+    /* --- Dubble pof! animatie --- */
+    @keyframes pofPop {
+      0%   { transform: scale(0.6); opacity: 0; }
+      20%  { transform: scale(1.12); opacity: 1; }
+      50%  { transform: scale(1.0); }
+      100% { transform: scale(0.9); opacity: 0; }
+    }
+    .pof-toast {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+      z-index: 9999;
+    }
+    .pof-bubble {
+      background: radial-gradient(circle at 30% 30%, rgba(34,197,94,0.96), rgba(16,185,129,0.92));
+      padding: 18px 26px;
+      border-radius: 999px;
+      font-size: 28px;
+      font-weight: 800;
+      box-shadow: 0 12px 40px rgba(0,0,0,.35);
+      animation: pofPop 1200ms ease-out forwards;
+      letter-spacing: .5px;
+    }
   `}</style>
 );
 
@@ -196,6 +223,16 @@ export default function PimPamPofWeb() {
     const letterRef = useRef(null);
     const connIdRef = useRef(null); // presence-connection id
 
+    // Dubble pof! UI state
+    const [pofShow, setPofShow] = useState(false);
+    const [pofText, setPofText] = useState("Dubble pof!");
+
+    function triggerPof(text = "Dubble pof!") {
+        setPofText(text);
+        setPofShow(true);
+        setTimeout(() => setPofShow(false), 1200);
+    }
+
     useEffect(() => { saveVragen(vragen); }, [vragen]);
 
     /* --------- presence per room ---------- */
@@ -229,9 +266,7 @@ export default function PimPamPofWeb() {
         onValue(r, (snap) => {
             const data = snap.val() ?? null;
             setRoom(data);
-
-            setIsHost(!!data && data.hostId === playerId);
-
+            setIsHost(!!data && data.hostId === playerId); // host-status uit serverstate
             if (!data) return;
 
             const { offline, mustHeal } = computeHealInfo(data);
@@ -247,8 +282,7 @@ export default function PimPamPofWeb() {
                 const ids = d.players ? Object.keys(d.players) : [];
                 if (ids.length === 0) return null;
 
-                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids)
-                    .filter(id => ids.includes(id));
+                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
                 if (d.playersOrder.length === 0) d.playersOrder = ids;
 
                 if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
@@ -258,7 +292,6 @@ export default function PimPamPofWeb() {
             });
         });
     }
-
 
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
@@ -360,7 +393,6 @@ export default function PimPamPofWeb() {
         });
     }
 
-    /* ---------- Kick een speler ---------- */
     async function kickPlayer(targetId) {
         if (!roomCode || !targetId) return;
         if (!confirm("Speler verwijderen?")) return;
@@ -390,7 +422,6 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        // presence best-effort opruimen
         try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
     }
 
@@ -434,10 +465,21 @@ export default function PimPamPofWeb() {
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
 
+    function normalizeLetter(ch) {
+        return (ch ?? "").toString().trim().toUpperCase();
+    }
+
     function onLetterChanged(e) {
-        const val = (e.target.value ?? "").trim().toUpperCase();
+        const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
-            if (isOnline && isMyTurn) submitLetterOnline(val);
+            if (isOnline && isMyTurn) {
+                // Bonus check vóór submit: als getypte letter gelijk is aan vereiste startletter → Dubble pof!
+                const required = normalizeLetter(room?.lastLetter);
+                if (required && required !== "?" && val === required) {
+                    triggerPof("Dubble pof!");
+                }
+                submitLetterOnline(val);
+            }
             e.target.value = "";
         }
     }
@@ -568,7 +610,7 @@ export default function PimPamPofWeb() {
                                 inputMode="text"
                                 maxLength={1}
                                 onChange={onLetterChanged}
-                                placeholder={isMyTurn ? "Jouw beurt, typ een letter..." : "Niet jouw beurt"}
+                                placeholder={isMyTurn ? "Jouw beurt, typ de laatste letter…" : "Niet jouw beurt"}
                                 disabled={!isMyTurn}
                                 style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
                             />
@@ -581,17 +623,12 @@ export default function PimPamPofWeb() {
                 {isOnline && room?.players && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
-                            {(
-                                Array.isArray(room.playersOrder)
-                                    ? room.playersOrder
-                                    : Object.keys(room.players)
-                            )
+                            {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
                                 .filter((id) => !!room.players[id])
                                 .map((id, idx) => {
                                     const p = room.players[id];
                                     const active = room.turn === id;
-                                    const showKick = id !== playerId; // 👉 altijd kickbaar behalve jezelf
-
+                                    const showKick = id !== playerId; // iedereen mag anderen kicken
                                     return (
                                         <li
                                             key={id}
@@ -601,10 +638,8 @@ export default function PimPamPofWeb() {
                                             }}
                                         >
                                             <div style={styles.liText}>
-                                                {idx + 1}. {p?.name || "Speler"}
-                                                {room.hostId === id && " (host)"}
+                                                {idx + 1}. {p?.name || "Speler"}{room?.hostId === id ? " (host)" : ""}
                                             </div>
-
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                                 {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
                                                 {showKick && (
@@ -618,11 +653,17 @@ export default function PimPamPofWeb() {
                     </Section>
                 )}
 
-
                 <footer style={styles.foot}>
-                    {isOnline ? "Online modus via Firebase Realtime Database (presence + self-heal). Spelers kunnen kicken." : "Maak een room aan of kies Solo starten."}
+                    {isOnline ? "Online modus via Firebase Realtime Database. Bonus: Dubble pof! bij begin=einde letter." : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
+
+            {/* Dubble pof! overlay */}
+            {pofShow && (
+                <div className="pof-toast">
+                    <div className="pof-bubble">{pofText}</div>
+                </div>
+            )}
         </>
     );
 }
