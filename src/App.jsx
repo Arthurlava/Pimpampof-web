@@ -8,7 +8,7 @@ import {
 
 const STORAGE_KEY = "ppp.vragen";
 
-/* --- GLOBALE CSS + Dubble pof! --- */
+/* --- GLOBALE CSS + Dubble pof! + Jilla banner --- */
 const GlobalStyle = () => (
     <style>{`
     html, body, #root { height: 100%; }
@@ -61,6 +61,19 @@ const GlobalStyle = () => (
       box-shadow: 0 12px 40px rgba(0,0,0,.35);
       animation: pofPop 1200ms ease-out forwards;
       letter-spacing: .5px;
+    }
+
+    /* --- Jilla banner --- */
+    @keyframes jillaPulse {
+      0%, 100% { transform: translateY(0); box-shadow: 0 8px 24px rgba(251, 146, 60, .25); }
+      50% { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(251, 146, 60, .35); }
+    }
+    .jilla-banner {
+      display:inline-flex; align-items:center; gap:10px;
+      background: linear-gradient(90deg, #f97316, #fb923c);
+      color:#111; font-weight:800; padding:10px 14px; border-radius:999px;
+      border:1px solid rgba(255,255,255,.3);
+      animation: jillaPulse 1.3s ease-in-out infinite;
     }
   `}</style>
 );
@@ -183,7 +196,7 @@ const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
 function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
 
-/* ---------- self-heal helper (presence moet bestaan én leeg zijn) ---------- */
+/* ---------- self-heal helper ---------- */
 function computeHealInfo(data) {
     const players = data.players ? Object.keys(data.players) : [];
     const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
@@ -285,7 +298,6 @@ export default function PimPamPofWeb() {
                 if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
 
                 if (d.jail) {
-                    // ruim jail-entries op voor spelers die niet meer bestaan
                     for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
                 }
 
@@ -312,7 +324,7 @@ export default function PimPamPofWeb() {
             lastLetter: "?",
             turn: playerId,
             started: false,
-            jail: {},            // <-- nieuw
+            jail: {},
             version: 1
         };
         await set(ref(db, `rooms/${code}`), obj);
@@ -366,15 +378,13 @@ export default function PimPamPofWeb() {
         setTimeout(() => letterRef.current?.focus(), 0);
     }
 
-    // Hulpfunctie: bepaal volgende speler met jilla-skip
     function advanceTurnWithJail(data) {
         const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
             .filter((id) => data.players && data.players[id]);
         if (ids.length === 0) return null;
 
         if (!data.jail) data.jail = {};
-        let idx = Math.max(0, ids.indexOf(data.turn)); // start vanaf huidige turn
-        // zoek volgende beschikbare speler; spelers met jail>0 worden 1 afgeteld en overgeslagen
+        let idx = Math.max(0, ids.indexOf(data.turn));
         for (let tries = 0; tries < ids.length; tries++) {
             idx = (idx + 1) % ids.length;
             const cand = ids[idx];
@@ -383,7 +393,6 @@ export default function PimPamPofWeb() {
             data.turn = cand;
             return cand;
         }
-        // fallback: als iedereen in jilla zat, kies degene na huidige (nu allemaal -1 gedaan)
         data.turn = ids[(ids.indexOf(data.turn) + 1) % ids.length];
         return data.turn;
     }
@@ -394,7 +403,6 @@ export default function PimPamPofWeb() {
         await runTransaction(r, (data) => {
             if (!data) return data;
 
-            // herstel turn als nodig
             if (!data.players || !data.players[data.turn]) {
                 const ids = data.players ? Object.keys(data.players) : [];
                 if (ids.length === 0) return null;
@@ -406,19 +414,16 @@ export default function PimPamPofWeb() {
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
 
-            // Dubble pof! check is client-side visueel (reeds gedaan vóór submit)
             data.lastLetter = letter;                                // nieuwe startletter
             data.currentIndex = (data.currentIndex + 1) % listLen;   // volgende vraag
             if (!data.jail) data.jail = {};
 
-            // volgende speler met jilla-regel
-            advanceTurnWithJail(data);
+            advanceTurnWithJail(data);                               // volgende speler (met jilla-skip)
 
             return data;
         });
     }
 
-    // --- JILLA: sla vraag over, hou lastLetter gelijk, zet jezelf in jilla (skip volgende beurt), beurt naar volgende speler
     async function useJilla() {
         if (!room) return;
         const r = ref(db, `rooms/${roomCode}`);
@@ -428,14 +433,9 @@ export default function PimPamPofWeb() {
             if (data.turn !== playerId) return data;
 
             const listLen = (data.order?.length ?? 0);
-            if (listLen > 0) {
-                data.currentIndex = (data.currentIndex + 1) % listLen;  // nieuwe vraag
-            }
-            // lastLetter blijft hetzelfde
+            if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen; // andere vraag
             if (!data.jail) data.jail = {};
-            data.jail[playerId] = (data.jail[playerId] || 0) + 1;      // volgende beurt overslaan
-
-            // beurt naar volgende (met jilla-skip voor anderen)
+            data.jail[playerId] = (data.jail[playerId] || 0) + 1;                    // volgende beurt skippen
             advanceTurnWithJail(data);
 
             return data;
@@ -513,6 +513,7 @@ export default function PimPamPofWeb() {
     /* ---------- UI helpers ---------- */
     const isOnline = !!roomCode;
     const isMyTurn = isOnline && room?.turn === playerId;
+    const myJailCount = isOnline && room?.jail ? (room.jail[playerId] || 0) : 0;
     const onlineQuestion = isOnline && room
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
@@ -520,17 +521,23 @@ export default function PimPamPofWeb() {
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
-            if (isOnline && isMyTurn) {
+            if (isOnline && isMyTurn && myJailCount === 0) {
                 const required = normalizeLetter(room?.lastLetter);
-                if (required && required !== "?" && val === required) {
-                    // woord begon en eindigde op dezelfde letter -> bonus
-                    triggerPof("Dubble pof!");
-                }
+                if (required && required !== "?" && val === required) triggerPof("Dubble pof!");
                 submitLetterOnline(val);
             }
             e.target.value = "";
         }
     }
+
+    // 👉 auto-focus zodra het jouw beurt is en je niet in jilla zit
+    useEffect(() => {
+        if (isOnline && room?.started && isMyTurn && myJailCount === 0) {
+            // kleine delay zodat input zeker gemount is
+            const t = setTimeout(() => letterRef.current?.focus(), 0);
+            return () => clearTimeout(t);
+        }
+    }, [isOnline, room?.started, isMyTurn, myJailCount]);
 
     function copyRoomCode() {
         if (!roomCode) return;
@@ -645,6 +652,14 @@ export default function PimPamPofWeb() {
                             <div className="badge">Room: <b>{roomCode}</b>
                                 <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
                             </div>
+
+                            {/* 👉 duidelijk jilla-bordje voor jezelf */}
+                            {myJailCount > 0 && (
+                                <div className="jilla-banner" style={{ marginTop: 4 }}>
+                                    🔒 Jilla actief — je wordt {myJailCount === 1 ? "1 beurt" : `${myJailCount} beurten`} overgeslagen
+                                </div>
+                            )}
+
                             <div style={{ fontSize: 18 }}>
                                 Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
                             </div>
@@ -652,19 +667,19 @@ export default function PimPamPofWeb() {
                                 {onlineQuestion ?? "Vraag komt hier..."}
                             </div>
 
-                            {/* jouw letter-invoer */}
+                            {/* jouw letter-invoer — auto-focus in useEffect */}
                             <input
                                 ref={letterRef}
                                 type="text"
                                 inputMode="text"
                                 maxLength={1}
                                 onChange={onLetterChanged}
-                                placeholder={isMyTurn ? "Jouw beurt — typ de laatste letter…" : "Niet jouw beurt"}
-                                disabled={!isMyTurn}
-                                style={{ ...styles.letterInput, opacity: isMyTurn ? 1 : 0.5 }}
+                                placeholder={(isMyTurn && myJailCount === 0) ? "Jouw beurt — typ de laatste letter…" : "Niet jouw beurt"}
+                                disabled={!isMyTurn || myJailCount > 0}
+                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0) ? 1 : 0.5 }}
                             />
 
-                            {/* JILLA knop */}
+                            {/* JILLA knop (alleen als het jouw beurt is) */}
                             {isMyTurn && (
                                 <div style={{ marginTop: 6 }}>
                                     <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
