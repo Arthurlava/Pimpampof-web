@@ -8,12 +8,12 @@ import {
 
 const STORAGE_KEY = "ppp.vragen";
 
-/* ---- GAME CONSTANTS ---- */
-const MAX_TIME_MS = 120000;    // 2 minuten tot 0 punten
-const MAX_POINTS = 200;        // maximale punten bij direct antwoord
-const DOUBLE_POF_BONUS = 30;   // bonus voor Dubble pof!
+/* ---- GAME CONSTANTS (multiplayer) ---- */
+const MAX_TIME_MS = 120000;    // 2 minuten -> 0 punten
+const MAX_POINTS = 200;        // max punten bij direct antwoord
+const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
-const COOLDOWN_MS = 10000;     // wachttijd na elk antwoord
+const COOLDOWN_MS = 10000;     // 10s wacht na elk antwoord
 
 function calcPoints(ms) {
     // Lineair: MAX_POINTS -> 0 in MAX_TIME_MS
@@ -114,6 +114,23 @@ const GlobalStyle = () => (
     }
     .score-plus  { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
     .score-minus { background: linear-gradient(90deg, #ef4444, #dc2626); color: #180404; }
+
+    /* --- Leaderboard overlay --- */
+    .overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.55);
+      display: flex; align-items: center; justify-content: center; z-index: 9998;
+    }
+    .card {
+      width: min(92vw, 720px);
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 16px; padding: 16px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 20px 60px rgba(0,0,0,.35);
+    }
+    .table { width:100%; border-collapse: collapse; }
+    .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
+    .table th { font-weight: 700; }
   `}</style>
 );
 
@@ -195,7 +212,7 @@ function saveVragen(vragen) { localStorage.setItem(STORAGE_KEY, JSON.stringify(v
 function splitInput(invoer) { return invoer.split(/[\n,]/g).map((s) => s.trim()).filter((s) => s.length > 0); }
 function shuffle(array) { const a = array.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
 
-/* ---------- persistente speler-id + (optioneel) naam ---------- */
+/* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
 function getOrCreatePlayerId() {
     try {
@@ -234,6 +251,7 @@ const db = getDatabase(firebaseApp);
 const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
 function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
+function ordinal(n) { return `${n}e`; } // simpel NL: 1e, 2e, 3e...
 
 /* ---------- self-heal helper ---------- */
 function computeHealInfo(data) {
@@ -288,9 +306,13 @@ export default function PimPamPofWeb() {
         setTimeout(() => setScoreToast(s => ({ ...s, show: false })), 1400);
     }
 
-    // Timer rendering tick
+    // Timer tick (alleen voor render/UX)
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => { const id = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(id); }, []);
+
+    // Leaderboard overlay state
+    const [leaderOpen, setLeaderOpen] = useState(false);
+    const [leaderData, setLeaderData] = useState(null);
 
     useEffect(() => { saveVragen(vragen); }, [vragen]);
 
@@ -349,6 +371,7 @@ export default function PimPamPofWeb() {
 
                 if (d.jail) for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
                 if (d.scores) for (const sid of Object.keys(d.scores)) if (!d.players[sid]) delete d.scores[sid];
+                if (d.stats) for (const sid of Object.keys(d.stats)) if (!d.players[sid]) delete d.stats[sid];
 
                 return d;
             });
@@ -357,7 +380,7 @@ export default function PimPamPofWeb() {
 
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
-    async function createRoom({ autoStart = false } = {}) {
+    async function createRoom({ autoStart = false, solo = false } = {}) {
         const code = makeRoomCode();
         const qs = getSeedQuestions();
         const order = shuffle([...Array(qs.length).keys()]);
@@ -373,12 +396,14 @@ export default function PimPamPofWeb() {
             lastLetter: "?",
             turn: playerId,
             started: false,
+            solo,                     // <— SOLO MODUS
             jail: {},
             scores: {},
-            phase: "answer",
-            turnStartAt: Date.now(),
+            stats: {},                // { id: { totalTimeMs, answeredCount, jillaCount, doubleCount } }
+            phase: solo ? "answer" : "answer",
+            turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
-            version: 3
+            version: 4
         };
         await set(ref(db, `rooms/${code}`), obj);
         setIsHost(true);
@@ -406,9 +431,14 @@ export default function PimPamPofWeb() {
             if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
             if (!data.jail) data.jail = {};
             if (!data.scores) data.scores = {};
+            if (!data.stats) data.stats = {};
+            // Als het een solo-room was en er komt een 2e speler bij -> naar multiplayer
+            const playerCount = Object.keys(data.players).length;
+            if (playerCount >= 2 && data.solo) data.solo = false;
+
             if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
-            if (!data.phase) { data.phase = "answer"; data.turnStartAt = Date.now(); data.cooldownEndAt = null; }
+            if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
             return data;
         });
 
@@ -425,7 +455,7 @@ export default function PimPamPofWeb() {
             lastLetter: "?",
             turn: room.playersOrder?.[0] || room.hostId,
             phase: "answer",
-            turnStartAt: Date.now(),
+            turnStartAt: room.solo ? null : Date.now(),
             cooldownEndAt: null
         });
         setTimeout(() => letterRef.current?.focus(), 0);
@@ -454,12 +484,12 @@ export default function PimPamPofWeb() {
     async function submitLetterOnline(letter) {
         if (!room) return;
 
-        // Bepaal score lokaal (voor UI); definitief bij transaction
+        const isMP = !!room && !room.solo;
         const elapsed = Math.max(0, Date.now() - (room?.turnStartAt ?? Date.now())); // ms
-        const basePoints = calcPoints(elapsed);
+        const basePoints = isMP ? calcPoints(elapsed) : 0;
         const required = normalizeLetter(room?.lastLetter);
         const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
-        const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
+        const bonus = isMP && isDouble ? DOUBLE_POF_BONUS : 0;
         const totalGain = basePoints + bonus;
 
         const r = ref(db, `rooms/${roomCode}`);
@@ -478,31 +508,48 @@ export default function PimPamPofWeb() {
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
 
-            if (!data.scores) data.scores = {};
-            data.scores[playerId] = (data.scores[playerId] || 0) + totalGain;
+            if (isMP) {
+                if (!data.scores) data.scores = {};
+                data.scores[playerId] = (data.scores[playerId] || 0) + totalGain;
 
-            data.lastLetter = letter;                                // nieuwe startletter
-            data.currentIndex = (data.currentIndex + 1) % listLen;   // volgende vraag
+                if (!data.stats) data.stats = {};
+                const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                s.totalTimeMs += elapsed;
+                s.answeredCount += 1;
+                if (isDouble) s.doubleCount += 1;
+                data.stats[playerId] = s;
+            }
 
-            // Volgende speler
+            // game state
+            data.lastLetter = letter;
+            data.currentIndex = (data.currentIndex + 1) % listLen;
             advanceTurnWithJail(data);
 
-            // Start cooldown
-            data.phase = "cooldown";
-            data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-            data.turnStartAt = null;
+            if (isMP) {
+                data.phase = "cooldown";
+                data.cooldownEndAt = Date.now() + COOLDOWN_MS;
+                data.turnStartAt = null;
+            } else {
+                // SOLO: geen cooldown / geen timer
+                data.phase = "answer";
+                data.turnStartAt = null;
+                data.cooldownEndAt = null;
+            }
 
             return data;
         });
 
-        // UI feedback
-        if (isDouble) triggerPof(`Dubble pof! +${bonus}`);
-        triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${bonus} bonus)` : ""}`, "plus");
+        if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+        if (isMP && totalGain > 0) {
+            triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`, "plus");
+        }
     }
 
     // Jilla
     async function useJilla() {
         if (!room) return;
+        const isMP = !!room && !room.solo;
+
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
@@ -511,23 +558,35 @@ export default function PimPamPofWeb() {
             if (data.phase !== "answer") return data;
 
             const listLen = (data.order?.length ?? 0);
-            if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen; // andere vraag
+            if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen;
+
             if (!data.jail) data.jail = {};
-            if (!data.scores) data.scores = {};
-            data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY;   // penalty
-            data.jail[playerId] = (data.jail[playerId] || 0) + 1;                   // volgende beurt skippen
+            data.jail[playerId] = (data.jail[playerId] || 0) + 1;
+
+            if (isMP) {
+                if (!data.scores) data.scores = {};
+                data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY;
+
+                if (!data.stats) data.stats = {};
+                const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                s.jillaCount += 1;
+                data.stats[playerId] = s;
+
+                data.phase = "cooldown";
+                data.cooldownEndAt = Date.now() + COOLDOWN_MS;
+                data.turnStartAt = null;
+            } else {
+                // SOLO: geen scores/penalty/timer
+                data.phase = "answer";
+                data.turnStartAt = null;
+                data.cooldownEndAt = null;
+            }
 
             advanceTurnWithJail(data);
-
-            // Cooldown
-            data.phase = "cooldown";
-            data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-            data.turnStartAt = null;
-
             return data;
         });
 
-        triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
+        if (isMP) triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
     }
 
     async function kickPlayer(targetId) {
@@ -542,6 +601,7 @@ export default function PimPamPofWeb() {
             delete data.players[targetId];
             if (data.jail && data.jail[targetId] != null) delete data.jail[targetId];
             if (data.scores && data.scores[targetId] != null) delete data.scores[targetId];
+            if (data.stats && data.stats[targetId] != null) delete data.stats[targetId];
 
             if (Array.isArray(data.playersOrder)) {
                 data.playersOrder = data.playersOrder.filter(id => id !== targetId && data.players && data.players[id]);
@@ -564,6 +624,22 @@ export default function PimPamPofWeb() {
         try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
     }
 
+    // Leaderboard snapshot
+    function buildLeaderboardSnapshot(rm) {
+        const order = Array.isArray(rm.playersOrder) ? rm.playersOrder : Object.keys(rm.players || {});
+        const ids = order.filter(id => rm.players && rm.players[id]);
+        const arr = ids.map(id => {
+            const name = rm.players[id]?.name || "Speler";
+            const score = (rm.scores && rm.scores[id]) || 0;
+            const st = (rm.stats && rm.stats[id]) || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+            const avg = st.answeredCount > 0 ? (st.totalTimeMs / st.answeredCount) : null; // ms
+            return { id, name, score, avgMs: avg, answered: st.answeredCount || 0, jilla: st.jillaCount || 0, dpf: st.doubleCount || 0 };
+        });
+        // sort by score desc, stable by order
+        arr.sort((a, b) => b.score - a.score || ids.indexOf(a.id) - ids.indexOf(b.id));
+        return arr;
+    }
+
     async function leaveRoom() {
         if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
         const r = ref(db, `rooms/${roomCode}`);
@@ -573,6 +649,7 @@ export default function PimPamPofWeb() {
             if (data.players && data.players[playerId]) delete data.players[playerId];
             if (data.jail && data.jail[playerId] != null) delete data.jail[playerId];
             if (data.scores && data.scores[playerId] != null) delete data.scores[playerId];
+            if (data.stats && data.stats[playerId] != null) delete data.stats[playerId];
 
             if (Array.isArray(data.playersOrder)) {
                 data.playersOrder = data.playersOrder.filter(id => id !== playerId && data.players && data.players[id]);
@@ -600,12 +677,24 @@ export default function PimPamPofWeb() {
         setIsHost(false);
     }
 
-    /* ---------- cooldown -> answer overgang ---------- */
+    // Leave-click handler: toon leaderboard (alleen multiplayer & als game gestart) en dan leaven
+    async function onLeaveClick() {
+        if (room && room.started && !room.solo && room.players) {
+            const snap = buildLeaderboardSnapshot(room);
+            setLeaderData(snap);
+            setLeaderOpen(true);
+        }
+        await leaveRoom();
+    }
+
+    /* ---------- cooldown -> answer overgang (alleen multiplayer) ---------- */
     useEffect(() => {
         if (!roomCode || !room) return;
+        if (room.solo) return; // solo: geen cooldown/timer
         if (room.phase === "cooldown" && room.cooldownEndAt && now >= room.cooldownEndAt) {
             runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
                 if (!data) return data;
+                if (data.solo) return data;
                 if (data.phase !== "cooldown") return data;
                 if (!data.cooldownEndAt || Date.now() < data.cooldownEndAt) return data;
                 data.phase = "answer";
@@ -623,10 +712,11 @@ export default function PimPamPofWeb() {
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
 
-    const inCooldown = room?.phase === "cooldown";
+    const inCooldown = room?.phase === "cooldown" && !room?.solo;
     const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - now);
-    const answerElapsedMs = (room?.phase === "answer" && room?.turnStartAt) ? Math.max(0, now - room.turnStartAt) : 0;
-    const potentialPoints = calcPoints(answerElapsedMs);
+    const answerElapsedMs = (!room?.solo && room?.phase === "answer" && room?.turnStartAt)
+        ? Math.max(0, now - room.turnStartAt) : 0;
+    const potentialPoints = !room?.solo ? calcPoints(answerElapsedMs) : 0;
 
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
@@ -634,7 +724,6 @@ export default function PimPamPofWeb() {
             if (isOnline && isMyTurn && myJailCount === 0 && !inCooldown) {
                 const required = normalizeLetter(room?.lastLetter);
                 if (required && required !== "?" && val === required) {
-                    // toont ook aparte Dubble pof! bubble
                     triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
                 }
                 submitLetterOnline(val);
@@ -692,8 +781,8 @@ export default function PimPamPofWeb() {
 
                         {!isOnline ? (
                             <>
-                                <Button onClick={() => createRoom({ autoStart: true })}>Solo starten</Button>
-                                <Button variant="alt" onClick={() => createRoom({ autoStart: false })}>Room aanmaken</Button>
+                                <Button onClick={() => createRoom({ autoStart: true, solo: true })}>Solo starten</Button>
+                                <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>Room aanmaken</Button>
                                 <input style={styles.input} placeholder="Room code (bv. 82631)" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
                                 <Button variant="alt" onClick={joinRoom}>Join</Button>
                             </>
@@ -704,7 +793,7 @@ export default function PimPamPofWeb() {
                                         <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
                                     </span>
                                 )}
-                                <Button variant="alt" onClick={leaveRoom}>Leave</Button>
+                                <Button variant="alt" onClick={onLeaveClick}>Leave</Button>
                             </>
                         )}
                     </Row>
@@ -718,7 +807,9 @@ export default function PimPamPofWeb() {
                             <span className="muted">Wachten op host…</span>
                         )}
                         {isOnline && room?.started && (
-                            <span className="muted">Spel gestart — room code blijft zichtbaar voor joiners.</span>
+                            <span className="muted">
+                                {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief."}
+                            </span>
                         )}
                     </Row>
                 </header>
@@ -784,14 +875,18 @@ export default function PimPamPofWeb() {
                                 {onlineQuestion ?? "Vraag komt hier..."}
                             </div>
 
-                            {/* Timer/Cooldown UI + Potentiële punten */}
-                            {room?.phase === "cooldown" ? (
-                                <div className="badge">⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s</div>
-                            ) : (
-                                <Row>
-                                    <span className="badge">⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s</span>
-                                    <span className="badge">🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b></span>
-                                </Row>
+                            {/* Timer/Cooldown alleen multiplayer */}
+                            {!room.solo && (
+                                <>
+                                    {inCooldown ? (
+                                        <div className="badge">⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s</div>
+                                    ) : (
+                                        <Row>
+                                            <span className="badge">⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s</span>
+                                            <span className="badge">🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b></span>
+                                        </Row>
+                                    )}
+                                </>
                             )}
 
                             {/* letter-invoer */}
@@ -806,16 +901,16 @@ export default function PimPamPofWeb() {
                                         ? "Niet jouw beurt"
                                         : (myJailCount > 0
                                             ? "Jilla actief — jouw beurt wordt overgeslagen"
-                                            : (room?.phase === "cooldown"
+                                            : (inCooldown
                                                 ? "Wachten… ronde start zo"
                                                 : "Jouw beurt — typ de laatste letter…"))
                                 }
-                                disabled={!isMyTurn || myJailCount > 0 || room?.phase === "cooldown"}
-                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && room?.phase !== "cooldown") ? 1 : 0.5 }}
+                                disabled={!isMyTurn || myJailCount > 0 || inCooldown}
+                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && !inCooldown) ? 1 : 0.5 }}
                             />
 
                             {/* JILLA knop */}
-                            {isMyTurn && room?.phase !== "cooldown" && (
+                            {isMyTurn && !inCooldown && (
                                 <div style={{ marginTop: 6 }}>
                                     <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
                                 </div>
@@ -826,7 +921,7 @@ export default function PimPamPofWeb() {
                     </Section>
                 )}
 
-                {/* spelers + scores */}
+                {/* spelers + scores (scores alleen nuttig in MP) */}
                 {isOnline && room?.players && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
@@ -837,7 +932,7 @@ export default function PimPamPofWeb() {
                                     const active = room.turn === id;
                                     const jcount = (room.jail && room.jail[id]) || 0;
                                     const showKick = id !== playerId;
-                                    const score = (room.scores && room.scores[id]) || 0;
+                                    const score = (!room.solo && room.scores && room.scores[id]) || 0;
                                     return (
                                         <li
                                             key={id}
@@ -849,14 +944,11 @@ export default function PimPamPofWeb() {
                                             <div style={styles.liText}>
                                                 {idx + 1}. {p?.name || "Speler"}{room?.hostId === id ? " (host)" : ""}{" "}
                                                 {jcount > 0 && <span className="badge">Jilla x{jcount}</span>}
-                                                {" "}
-                                                <span className="badge">Punten: <b>{score}</b></span>
+                                                {!room.solo && <> <span style={{ margin: "0 6px" }}> </span><span className="badge">Punten: <b>{score}</b></span></>}
                                             </div>
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                                                 {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
-                                                {showKick && (
-                                                    <DangerButton onClick={() => kickPlayer(id)}>Kick</DangerButton>
-                                                )}
+                                                {showKick && (<DangerButton onClick={() => kickPlayer(id)}>Kick</DangerButton>)}
                                             </div>
                                         </li>
                                     );
@@ -867,7 +959,7 @@ export default function PimPamPofWeb() {
 
                 <footer style={styles.foot}>
                     {isOnline
-                        ? "Online via Firebase • 2-minuten scoretimer, cooldown, Jilla-penalty, Dubble pof! bonus."
+                        ? (room?.solo ? "Solo modus (geen timer/punten)." : "Multiplayer: timer & punten actief.")
                         : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
@@ -884,6 +976,42 @@ export default function PimPamPofWeb() {
                 <div className="score-toast">
                     <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
                         {scoreToast.text}
+                    </div>
+                </div>
+            )}
+
+            {/* Leaderboard overlay (na Leave) */}
+            {leaderOpen && leaderData && (
+                <div className="overlay" onClick={() => setLeaderOpen(false)}>
+                    <div className="card" onClick={e => e.stopPropagation()}>
+                        <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Leaderboard</h2>
+                        <table className="table">
+                            <thead>
+                                <tr>
+                                    <th>Rang</th>
+                                    <th>Speler</th>
+                                    <th>Punten</th>
+                                    <th>Gem. tijd / vraag</th>
+                                    <th>Jilla</th>
+                                    <th>Dubble pof</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {leaderData.map((r, i) => (
+                                    <tr key={r.id}>
+                                        <td>{ordinal(i + 1)}</td>
+                                        <td>{r.name}</td>
+                                        <td>{r.score}</td>
+                                        <td>{r.avgMs == null ? "—" : `${(r.avgMs / 1000).toFixed(1)}s`}</td>
+                                        <td>{r.jilla}</td>
+                                        <td>{r.dpf}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
+                            <Button variant="alt" onClick={() => setLeaderOpen(false)}>Sluiten</Button>
+                        </div>
                     </div>
                 </div>
             )}
