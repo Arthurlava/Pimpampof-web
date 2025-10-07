@@ -9,14 +9,19 @@ import {
 const STORAGE_KEY = "ppp.vragen";
 
 /* ---- GAME CONSTANTS ---- */
-const COOLDOWN_MS = 10000;     // wachttijd na elk antwoord
+const MAX_TIME_MS = 120000;    // 2 minuten tot 0 punten
+const MAX_POINTS = 200;        // maximale punten bij direct antwoord
+const DOUBLE_POF_BONUS = 30;   // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
+const COOLDOWN_MS = 10000;     // wachttijd na elk antwoord
+
 function calcPoints(ms) {
-    // 100 punten bij ~0s, -1 punt per 100ms -> 5s = 50p, 10s=0p
-    return Math.max(0, 100 - Math.floor(ms / 100));
+    // Lineair: MAX_POINTS -> 0 in MAX_TIME_MS
+    const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
+    return Math.max(0, p);
 }
 
-/* --- GLOBALE CSS + Dubble pof! + Jilla banner --- */
+/* --- GLOBALE CSS + Animaties --- */
 const GlobalStyle = () => (
     <style>{`
     html, body, #root { height: 100%; }
@@ -83,6 +88,32 @@ const GlobalStyle = () => (
       border:1px solid rgba(255,255,255,.3);
       animation: jillaPulse 1.3s ease-in-out infinite;
     }
+
+    /* --- Score toast (plus/minus) --- */
+    @keyframes scoreToast {
+      0%   { transform: translateY(8px); opacity: 0; }
+      15%  { transform: translateY(0);   opacity: 1; }
+      85%  { transform: translateY(0);   opacity: 1; }
+      100% { transform: translateY(-6px); opacity: 0; }
+    }
+    .score-toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      z-index: 9999;
+      pointer-events: none;
+      animation: scoreToast 1400ms ease-out forwards;
+    }
+    .score-bubble {
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 800;
+      box-shadow: 0 12px 28px rgba(0,0,0,.35);
+      font-size: 16px;
+    }
+    .score-plus  { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
+    .score-minus { background: linear-gradient(90deg, #ef4444, #dc2626); color: #180404; }
   `}</style>
 );
 
@@ -250,6 +281,13 @@ export default function PimPamPofWeb() {
     const [pofText, setPofText] = useState("Dubble pof!");
     function triggerPof(text = "Dubble pof!") { setPofText(text); setPofShow(true); setTimeout(() => setPofShow(false), 1200); }
 
+    // Score toast UI
+    const [scoreToast, setScoreToast] = useState({ show: false, text: "", type: "plus" });
+    function triggerScoreToast(text, type = "plus") {
+        setScoreToast({ show: true, text, type });
+        setTimeout(() => setScoreToast(s => ({ ...s, show: false })), 1400);
+    }
+
     // Timer rendering tick
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => { const id = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(id); }, []);
@@ -309,12 +347,8 @@ export default function PimPamPofWeb() {
                 if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
                 if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
 
-                if (d.jail) {
-                    for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
-                }
-                if (d.scores) {
-                    for (const sid of Object.keys(d.scores)) if (!d.players[sid]) delete d.scores[sid];
-                }
+                if (d.jail) for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
+                if (d.scores) for (const sid of Object.keys(d.scores)) if (!d.players[sid]) delete d.scores[sid];
 
                 return d;
             });
@@ -340,11 +374,11 @@ export default function PimPamPofWeb() {
             turn: playerId,
             started: false,
             jail: {},
-            scores: {},             // score map
-            phase: "answer",        // start gelijk met answer
-            turnStartAt: Date.now(),// lokale starttijd
+            scores: {},
+            phase: "answer",
+            turnStartAt: Date.now(),
             cooldownEndAt: null,
-            version: 2
+            version: 3
         };
         await set(ref(db, `rooms/${code}`), obj);
         setIsHost(true);
@@ -352,9 +386,7 @@ export default function PimPamPofWeb() {
         attachRoomListener(code);
 
         if (autoStart) {
-            await update(ref(db, `rooms/${code}`), {
-                started: true
-            });
+            await update(ref(db, `rooms/${code}`), { started: true });
             setTimeout(() => letterRef.current?.focus(), 0);
         }
     }
@@ -399,7 +431,6 @@ export default function PimPamPofWeb() {
         setTimeout(() => letterRef.current?.focus(), 0);
     }
 
-    // Zoek de volgende speler (met jilla-skip, tel jilla af)
     function advanceTurnWithJail(data) {
         const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
             .filter((id) => data.players && data.players[id]);
@@ -419,11 +450,17 @@ export default function PimPamPofWeb() {
         return data.turn;
     }
 
-    // Antwoord indienen (letter)
+    // Antwoord indienen
     async function submitLetterOnline(letter) {
         if (!room) return;
+
+        // Bepaal score lokaal (voor UI); definitief bij transaction
         const elapsed = Math.max(0, Date.now() - (room?.turnStartAt ?? Date.now())); // ms
-        const gained = calcPoints(elapsed);
+        const basePoints = calcPoints(elapsed);
+        const required = normalizeLetter(room?.lastLetter);
+        const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
+        const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
+        const totalGain = basePoints + bonus;
 
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
@@ -437,17 +474,17 @@ export default function PimPamPofWeb() {
             }
 
             if (data.turn !== playerId) return data;
-            if (data.phase !== "answer") return data; // alleen tijdens answer
+            if (data.phase !== "answer") return data;
             const listLen = (data.order?.length ?? 0);
             if (listLen === 0) return data;
 
             if (!data.scores) data.scores = {};
-            data.scores[playerId] = (data.scores[playerId] || 0) + gained;
+            data.scores[playerId] = (data.scores[playerId] || 0) + totalGain;
 
             data.lastLetter = letter;                                // nieuwe startletter
             data.currentIndex = (data.currentIndex + 1) % listLen;   // volgende vraag
 
-            // Volgende speler (met jilla-skip)
+            // Volgende speler
             advanceTurnWithJail(data);
 
             // Start cooldown
@@ -457,9 +494,13 @@ export default function PimPamPofWeb() {
 
             return data;
         });
+
+        // UI feedback
+        if (isDouble) triggerPof(`Dubble pof! +${bonus}`);
+        triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${bonus} bonus)` : ""}`, "plus");
     }
 
-    // Jilla gebruiken: vraag wisselt, letter blijft, penalty, naar cooldown + volgende speler
+    // Jilla
     async function useJilla() {
         if (!room) return;
         const r = ref(db, `rooms/${roomCode}`);
@@ -473,21 +514,22 @@ export default function PimPamPofWeb() {
             if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen; // andere vraag
             if (!data.jail) data.jail = {};
             if (!data.scores) data.scores = {};
-            data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY; // penalty
-            data.jail[playerId] = (data.jail[playerId] || 0) + 1;                 // volgende beurt skippen
+            data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY;   // penalty
+            data.jail[playerId] = (data.jail[playerId] || 0) + 1;                   // volgende beurt skippen
 
             advanceTurnWithJail(data);
 
-            // Cooldown na Jilla
+            // Cooldown
             data.phase = "cooldown";
             data.cooldownEndAt = Date.now() + COOLDOWN_MS;
             data.turnStartAt = null;
 
             return data;
         });
+
+        triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
     }
 
-    // Kick speler
     async function kickPlayer(targetId) {
         if (!roomCode || !targetId) return;
         if (!confirm("Speler verwijderen?")) return;
@@ -514,7 +556,6 @@ export default function PimPamPofWeb() {
 
             if (!data.turn || data.turn === targetId || !data.players[data.turn]) {
                 data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
-                // Bij kick tijdens cooldown/answer laten we fase staan; turnStartAt blijft zoals was.
             }
 
             return data;
@@ -523,7 +564,6 @@ export default function PimPamPofWeb() {
         try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
     }
 
-    // Verlaten
     async function leaveRoom() {
         if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
         const r = ref(db, `rooms/${roomCode}`);
@@ -560,11 +600,10 @@ export default function PimPamPofWeb() {
         setIsHost(false);
     }
 
-    /* ---------- cooldown -> answer overgang (automatisch) ---------- */
+    /* ---------- cooldown -> answer overgang ---------- */
     useEffect(() => {
         if (!roomCode || !room) return;
         if (room.phase === "cooldown" && room.cooldownEndAt && now >= room.cooldownEndAt) {
-            // Probeer fase te flippen (1 wint de race)
             runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
                 if (!data) return data;
                 if (data.phase !== "cooldown") return data;
@@ -587,13 +626,17 @@ export default function PimPamPofWeb() {
     const inCooldown = room?.phase === "cooldown";
     const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - now);
     const answerElapsedMs = (room?.phase === "answer" && room?.turnStartAt) ? Math.max(0, now - room.turnStartAt) : 0;
+    const potentialPoints = calcPoints(answerElapsedMs);
 
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
             if (isOnline && isMyTurn && myJailCount === 0 && !inCooldown) {
                 const required = normalizeLetter(room?.lastLetter);
-                if (required && required !== "?" && val === required) triggerPof("Dubble pof!");
+                if (required && required !== "?" && val === required) {
+                    // toont ook aparte Dubble pof! bubble
+                    triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+                }
                 submitLetterOnline(val);
             }
             e.target.value = "";
@@ -741,11 +784,14 @@ export default function PimPamPofWeb() {
                                 {onlineQuestion ?? "Vraag komt hier..."}
                             </div>
 
-                            {/* Timer/Cooldown UI */}
-                            {inCooldown ? (
+                            {/* Timer/Cooldown UI + Potentiële punten */}
+                            {room?.phase === "cooldown" ? (
                                 <div className="badge">⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s</div>
                             ) : (
-                                <div className="badge">⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s</div>
+                                <Row>
+                                    <span className="badge">⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s</span>
+                                    <span className="badge">🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b></span>
+                                </Row>
                             )}
 
                             {/* letter-invoer */}
@@ -760,16 +806,16 @@ export default function PimPamPofWeb() {
                                         ? "Niet jouw beurt"
                                         : (myJailCount > 0
                                             ? "Jilla actief — jouw beurt wordt overgeslagen"
-                                            : (inCooldown
+                                            : (room?.phase === "cooldown"
                                                 ? "Wachten… ronde start zo"
                                                 : "Jouw beurt — typ de laatste letter…"))
                                 }
-                                disabled={!isMyTurn || myJailCount > 0 || inCooldown}
-                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && !inCooldown) ? 1 : 0.5 }}
+                                disabled={!isMyTurn || myJailCount > 0 || room?.phase === "cooldown"}
+                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && room?.phase !== "cooldown") ? 1 : 0.5 }}
                             />
 
-                            {/* JILLA knop (alleen als het jouw beurt is en niet in cooldown) */}
-                            {isMyTurn && !inCooldown && (
+                            {/* JILLA knop */}
+                            {isMyTurn && room?.phase !== "cooldown" && (
                                 <div style={{ marginTop: 6 }}>
                                     <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
                                 </div>
@@ -821,7 +867,7 @@ export default function PimPamPofWeb() {
 
                 <footer style={styles.foot}>
                     {isOnline
-                        ? "Online via Firebase • Timer-score, cooldown, Jilla-penalty."
+                        ? "Online via Firebase • 2-minuten scoretimer, cooldown, Jilla-penalty, Dubble pof! bonus."
                         : "Maak een room aan of kies Solo starten."}
                 </footer>
             </div>
@@ -830,6 +876,15 @@ export default function PimPamPofWeb() {
             {pofShow && (
                 <div className="pof-toast">
                     <div className="pof-bubble">{pofText}</div>
+                </div>
+            )}
+
+            {/* Score delta toast */}
+            {scoreToast.show && (
+                <div className="score-toast">
+                    <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
+                        {scoreToast.text}
+                    </div>
                 </div>
             )}
         </>
