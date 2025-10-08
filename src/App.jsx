@@ -13,7 +13,7 @@ const MAX_TIME_MS = 120000;    // 2 minuten -> 0 punten
 const MAX_POINTS = 200;        // max punten bij direct antwoord
 const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
-const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord  ← aangepast
+const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord
 
 function calcPoints(ms) {
     const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
@@ -192,7 +192,10 @@ const NAME_KEY = "ppp.playerName";
 /* ---------- kleine UI helpers ---------- */
 function Section({ title, children }) { return (<div style={styles.section}>{title && <h2 style={styles.sectionTitle}>{title}</h2>}{children}</div>); }
 function Row({ children }) { return <div style={styles.row}>{children}</div>; }
-function Button({ children, onClick, variant }) { let s = { ...styles.btn }; if (variant === "alt") s = { ...s, ...styles.btnAlt }; if (variant === "stop") s = { ...s, ...styles.btnStop }; return <button onClick={onClick} style={s}>{children}</button>; }
+function Button({ children, onClick, variant, disabled }) {
+    let s = { ...styles.btn }; if (variant === "alt") s = { ...s, ...styles.btnAlt }; if (variant === "stop") s = { ...s, ...styles.btnStop };
+    return <button onClick={onClick} style={{ ...s, opacity: disabled ? .6 : 1, cursor: disabled ? "not-allowed" : "pointer" }} disabled={disabled}>{children}</button>;
+}
 function DangerButton({ children, onClick }) { return <button onClick={onClick} style={styles.btnDanger}>{children}</button>; }
 function TextArea({ value, onChange, placeholder }) { return <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={styles.textarea} />; }
 
@@ -238,6 +241,19 @@ function computeHealInfo(data) {
     return { players, offline, orderFiltered, mustHeal };
 }
 
+/* ---------- online/offline hook ---------- */
+function useOnline() {
+    const [online, setOnline] = React.useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+    React.useEffect(() => {
+        const on = () => setOnline(true);
+        const off = () => setOnline(false);
+        window.addEventListener("online", on);
+        window.addEventListener("offline", off);
+        return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); };
+    }, []);
+    return online;
+}
+
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
@@ -246,7 +262,38 @@ export default function PimPamPofWeb() {
     useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
 
     const [playerId] = useState(() => getOrCreatePlayerId());
+    const online = useOnline();
 
+    // --- OFFLINE SOLO state (geen Firebase) ---
+    const [offlineSolo, setOfflineSolo] = useState(false);
+    const [offIndex, setOffIndex] = useState(-1);
+    const [offLastLetter, setOffLastLetter] = useState("?");
+    const [offOrder, setOffOrder] = useState([]);
+
+    function startOffline() {
+        const qs = getSeedQuestions();
+        if (!qs || qs.length === 0) { alert("Geen vragen beschikbaar."); return; }
+        setOfflineSolo(true);
+        setOffOrder(shuffle([...Array(qs.length).keys()]));
+        setOffIndex(0);
+        setOffLastLetter("?");
+        setTimeout(() => letterRef.current?.focus(), 0);
+    }
+    function stopOffline() {
+        setOfflineSolo(false);
+        setOffIndex(-1);
+        setOffLastLetter("?");
+    }
+    function onOfflineLetterChanged(e) {
+        const val = normalizeLetter(e.target.value);
+        if (val.length === 1) {
+            setOffLastLetter(val);
+            setOffIndex(i => (i + 1) % (offOrder.length || 1));
+            e.target.value = '';
+        }
+    }
+
+    // --- ONLINE room state ---
     const [roomCodeInput, setRoomCodeInput] = useState("");
     const [roomCode, setRoomCode] = useState("");
     const [room, setRoom] = useState(null);
@@ -318,7 +365,7 @@ export default function PimPamPofWeb() {
             runTransaction(ref(db, `rooms/${code}`), (d) => {
                 if (!d) return d;
 
-                // verwijder alleen jail voor vertrokken spelers; scores/stats/participants blijven
+                // verwijder alleen jail/presence voor vertrokken spelers; scores/stats/participants blijven
                 if (d.players && d.presence) {
                     for (const id of offline) { delete d.players[id]; }
                 }
@@ -342,6 +389,7 @@ export default function PimPamPofWeb() {
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
     async function createRoom({ autoStart = false, solo = false } = {}) {
+        if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
         const code = makeRoomCode();
         const qs = getSeedQuestions();
         const order = shuffle([...Array(qs.length).keys()]);
@@ -350,7 +398,7 @@ export default function PimPamPofWeb() {
             createdAt: serverTimestamp(),
             hostId: playerId,
             players: { [playerId]: { name: playerName || "Host", joinedAt: serverTimestamp() } },
-            participants: { [playerId]: { name: playerName || "Host", firstJoinedAt: serverTimestamp() } }, // ← nieuw
+            participants: { [playerId]: { name: playerName || "Host", firstJoinedAt: serverTimestamp() } },
             playersOrder,
             questions: qs,
             order,
@@ -361,7 +409,7 @@ export default function PimPamPofWeb() {
             solo,
             jail: {},
             scores: {},
-            stats: {},                // { id: { totalTimeMs, answeredCount, jillaCount, doubleCount } }
+            stats: {},
             phase: solo ? "answer" : "answer",
             turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
@@ -379,6 +427,7 @@ export default function PimPamPofWeb() {
     }
 
     async function joinRoom() {
+        if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
         const code = (roomCodeInput || "").trim().toUpperCase();
         if (!code) { alert("Voer een room code in."); return; }
         const r = ref(db, `rooms/${code}`);
@@ -390,7 +439,6 @@ export default function PimPamPofWeb() {
             if (!data.players) data.players = {};
             data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
 
-            // voeg aan participants toe en update naam
             if (!data.participants) data.participants = {};
             data.participants[playerId] = data.participants[playerId] || { name: playerName || "Speler", firstJoinedAt: serverTimestamp() };
             data.participants[playerId].name = playerName || data.participants[playerId].name;
@@ -402,7 +450,6 @@ export default function PimPamPofWeb() {
             if (!data.scores) data.scores = {};
             if (!data.stats) data.stats = {};
 
-            // indien solo en er komt een 2e bij → multiplayer
             const playerCount = Object.keys(data.players).length;
             if (playerCount >= 2 && data.solo) data.solo = false;
 
@@ -418,6 +465,7 @@ export default function PimPamPofWeb() {
     }
 
     async function startSpelOnline() {
+        if (!navigator.onLine) { alert("Je bent offline — kan niet starten."); return; }
         if (!room || !isHost) { return; }
         await update(ref(db, `rooms/${roomCode}`), {
             started: true,
@@ -450,7 +498,7 @@ export default function PimPamPofWeb() {
         return data.turn;
     }
 
-    // Antwoord indienen
+    // Antwoord indienen (alleen multiplayer geeft punten)
     async function submitLetterOnline(letter) {
         if (!room) return;
 
@@ -583,14 +631,13 @@ export default function PimPamPofWeb() {
                 data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
             }
 
-            // ⛔️ scores/stats/participants blijven bestaan
+            // scores/stats/participants blijven bestaan
             return data;
         });
 
         try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
     }
 
-    // Leaderboard snapshot (gebaseerd op participants, niet op players)
     function buildLeaderboardSnapshot(rm) {
         const par = rm.participants ? Object.keys(rm.participants) : [];
         const arr = par.map(id => {
@@ -625,7 +672,6 @@ export default function PimPamPofWeb() {
                 data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
             }
 
-            // ⛔️ scores/stats/participants blijven bestaan
             return data;
         });
 
@@ -640,7 +686,6 @@ export default function PimPamPofWeb() {
         setIsHost(false);
     }
 
-    // Leave-click handler: toon leaderboard (alleen multiplayer & gestart) en dan leaven
     async function onLeaveClick() {
         if (room && room.started && !room.solo && (room.participants || room.players)) {
             const snap = buildLeaderboardSnapshot(room);
@@ -668,10 +713,10 @@ export default function PimPamPofWeb() {
     }, [roomCode, room?.phase, room?.cooldownEndAt, now, room]);
 
     /* ---------- UI helpers ---------- */
-    const isOnline = !!roomCode;
-    const isMyTurn = isOnline && room?.turn === playerId;
-    const myJailCount = isOnline && room?.jail ? (room.jail[playerId] || 0) : 0;
-    const onlineQuestion = isOnline && room
+    const isOnlineRoom = !!roomCode; // in een online room (niet "online" status)
+    const isMyTurn = isOnlineRoom && room?.turn === playerId;
+    const myJailCount = isOnlineRoom && room?.jail ? (room.jail[playerId] || 0) : 0;
+    const onlineQuestion = isOnlineRoom && room
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
 
@@ -684,7 +729,7 @@ export default function PimPamPofWeb() {
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
-            if (isOnline && isMyTurn && myJailCount === 0 && !inCooldown) {
+            if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
                 const required = normalizeLetter(room?.lastLetter);
                 if (required && required !== "?" && val === required) {
                     triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
@@ -696,11 +741,11 @@ export default function PimPamPofWeb() {
     }
 
     useEffect(() => {
-        if (isOnline && room?.started && isMyTurn && myJailCount === 0 && !inCooldown) {
+        if (isOnlineRoom && room?.started && isMyTurn && myJailCount === 0 && !inCooldown) {
             const t = setTimeout(() => letterRef.current?.focus(), 0);
             return () => clearTimeout(t);
         }
-    }, [isOnline, room?.started, isMyTurn, myJailCount, inCooldown]);
+    }, [isOnlineRoom, room?.started, isMyTurn, myJailCount, inCooldown]);
 
     function copyRoomCode() {
         if (!roomCode) return;
@@ -730,8 +775,9 @@ export default function PimPamPofWeb() {
                 <header style={styles.header}>
                     <h1 style={styles.h1}>PimPamPof</h1>
 
+                    {/* Bovenste controls met offline/online logica */}
                     <Row>
-                        {!room?.started && (
+                        {!room?.started && !offlineSolo && (
                             <input
                                 style={styles.input}
                                 placeholder="Jouw naam"
@@ -740,14 +786,32 @@ export default function PimPamPofWeb() {
                             />
                         )}
 
-                        {!isOnline ? (
+                        {/* Niet in room en niet in offline solo */}
+                        {!isOnlineRoom && !offlineSolo && (
                             <>
-                                <Button onClick={() => createRoom({ autoStart: true, solo: true })}>Solo starten</Button>
-                                <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>Room aanmaken</Button>
-                                <input style={styles.input} placeholder="Room code (bv. 82631)" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
-                                <Button variant="alt" onClick={joinRoom}>Join</Button>
+                                {!online ? (
+                                    <>
+                                        <span className="badge">Offline — alleen solo</span>
+                                        <Button onClick={startOffline}>Solo (offline)</Button>
+                                    </>
+                                ) : (
+                                    <>
+                                        <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>Room aanmaken</Button>
+                                        <input style={styles.input} placeholder="Room code" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
+                                        <Button variant="alt" onClick={joinRoom}>Join</Button>
+                                        <Button onClick={startOffline}>Solo (offline)</Button>
+                                    </>
+                                )}
                             </>
-                        ) : (
+                        )}
+
+                        {/* Offline solo actief */}
+                        {offlineSolo && (
+                            <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
+                        )}
+
+                        {/* In online room */}
+                        {isOnlineRoom && (
                             <>
                                 {!room?.started && (
                                     <span className="badge">Room: <b>{roomCode}</b>
@@ -759,22 +823,25 @@ export default function PimPamPofWeb() {
                         )}
                     </Row>
 
+                    {/* Statusbalk */}
                     <Row>
-                        {isOnline && isHost && !room?.started && (
+                        {isOnlineRoom && online && isHost && !room?.started && (
                             <Button onClick={startSpelOnline}>Start spel (online)</Button>
                         )}
-                        {isOnline && !isHost && !room?.started && (
+                        {isOnlineRoom && online && !isHost && !room?.started && (
                             <span className="muted">Wachten op host…</span>
                         )}
-                        {isOnline && room?.started && (
+                        {isOnlineRoom && room?.started && (
                             <span className="muted">
-                                {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s wacht tussen beurten)."}
+                                {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s cooldown)."}
                             </span>
                         )}
+                        {!online && !offlineSolo && <span className="muted">Geen internet — start Solo (offline)</span>}
                     </Row>
                 </header>
 
-                {(!isOnline || (isOnline && isHost && !room?.started)) && (
+                {/* beheer vragen (geen room óf (host en niet gestart)) */}
+                {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && (
                     <>
                         <Section title="Nieuwe vragen (gescheiden met , of enter)">
                             <TextArea
@@ -807,7 +874,38 @@ export default function PimPamPofWeb() {
                     </>
                 )}
 
-                {isOnline && room?.started && (
+                {/* OFFLINE SOLO speelveld */}
+                {offlineSolo && (
+                    <Section>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+                            <div className="badge">Offline solo — geen internet nodig</div>
+
+                            <div style={{ fontSize: 18 }}>
+                                Laatste letter: <span style={{ fontWeight: 700 }}>{offLastLetter}</span>
+                            </div>
+                            <div style={{ fontSize: 22, minHeight: "3rem" }}>
+                                {(() => {
+                                    const qs = getSeedQuestions();
+                                    const qIdx = offOrder[offIndex] ?? 0;
+                                    return qs[qIdx] ?? "Vraag komt hier...";
+                                })()}
+                            </div>
+
+                            <input
+                                ref={letterRef}
+                                type="text"
+                                inputMode="text"
+                                maxLength={1}
+                                onChange={onOfflineLetterChanged}
+                                placeholder="Typ de laatste letter…"
+                                style={styles.letterInput}
+                            />
+                        </div>
+                    </Section>
+                )}
+
+                {/* ONLINE speelveld */}
+                {isOnlineRoom && room?.started && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
                             <div className="badge">Room: <b>{roomCode}</b>
@@ -815,11 +913,11 @@ export default function PimPamPofWeb() {
                             </div>
 
                             {(() => {
-                                const myJailCount = room?.jail ? (room.jail[playerId] || 0) : 0;
-                                return myJailCount > 0 && (
+                                const myJ = room?.jail ? (room.jail[playerId] || 0) : 0;
+                                return myJ > 0 && (
                                     <>
                                         <div className="jilla-banner" style={{ marginTop: 4 }}>
-                                            🔒 Jilla actief — je wordt {myJailCount === 1 ? "1 beurt" : `${myJailCount} beurten`} overgeslagen
+                                            🔒 Jilla actief — je wordt {myJ === 1 ? "1 beurt" : `${myJ} beurten`} overgeslagen
                                         </div>
                                         <div className="muted" style={{ marginTop: 4 }}>
                                             Je volgende beurt wordt <b>overgeslagen</b> (Jilla).
@@ -832,7 +930,7 @@ export default function PimPamPofWeb() {
                                 Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
                             </div>
                             <div style={{ fontSize: 22, minHeight: "3rem" }}>
-                                {room ? (room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier...") : "Vraag komt hier..."}
+                                {onlineQuestion ?? "Vraag komt hier..."}
                             </div>
 
                             {!room.solo && (
@@ -855,30 +953,31 @@ export default function PimPamPofWeb() {
                                 maxLength={1}
                                 onChange={onLetterChanged}
                                 placeholder={
-                                    !(room && room.turn === playerId)
+                                    !isMyTurn
                                         ? "Niet jouw beurt"
-                                        : ((room?.jail && room.jail[playerId] > 0)
+                                        : (myJailCount > 0
                                             ? "Jilla actief — jouw beurt wordt overgeslagen"
                                             : (inCooldown
                                                 ? "Wachten… ronde start zo"
                                                 : "Jouw beurt — typ de laatste letter…"))
                                 }
-                                disabled={!(room && room.turn === playerId) || (room?.jail && room.jail[playerId] > 0) || inCooldown}
-                                style={{ ...styles.letterInput, opacity: ((room && room.turn === playerId) && !(room?.jail && room.jail[playerId] > 0) && !inCooldown) ? 1 : 0.5 }}
+                                disabled={!isMyTurn || myJailCount > 0 || inCooldown}
+                                style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && !inCooldown) ? 1 : 0.5 }}
                             />
 
-                            {(room && room.turn === playerId) && !inCooldown && (
+                            {isMyTurn && !inCooldown && (
                                 <div style={{ marginTop: 6 }}>
                                     <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
                                 </div>
                             )}
 
-                            {!(room && room.turn === playerId) && <div className="muted">Wachten op je beurt…</div>}
+                            {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
                         </div>
                     </Section>
                 )}
 
-                {isOnline && room?.participants && (
+                {/* Spelerslijst met scores (alleen online room) */}
+                {isOnlineRoom && room?.participants && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
                             {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players || {}))
@@ -914,18 +1013,20 @@ export default function PimPamPofWeb() {
                 )}
 
                 <footer style={styles.foot}>
-                    {isOnline
+                    {isOnlineRoom
                         ? (room?.solo ? "Solo modus (geen timer/punten)." : "Multiplayer: timer & punten actief (5s cooldown).")
-                        : "Maak een room aan of kies Solo starten."}
+                        : (offlineSolo ? "Offline solo actief." : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline)."))}
                 </footer>
             </div>
 
+            {/* Dubble pof! overlay */}
             {pofShow && (
                 <div className="pof-toast">
                     <div className="pof-bubble">{pofText}</div>
                 </div>
             )}
 
+            {/* Score delta toast */}
             {scoreToast.show && (
                 <div className="score-toast">
                     <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
