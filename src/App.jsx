@@ -124,20 +124,40 @@ const styles = {
     foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
 };
 
-/* ---------- localStorage helpers ---------- */
-function seedDefaults() { return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst })); }
-function loadVragen() {
-    try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (!raw) { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
-        const parsed = JSON.parse(raw);
-        if (!Array.isArray(parsed) || parsed.length === 0) { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
-        return parsed.map((v) => ({ id: v.id ?? crypto.randomUUID(), tekst: String(v.tekst ?? "") }));
-    } catch { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
+// ---- STORAGE (versioned) ----
+const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2"]; // wat jij eerder had
+
+function seedDefaults() {
+  return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst }));
 }
-function saveVragen(vragen) { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); }
-function splitInput(invoer) { return invoer.split(/[\n,]/g).map((s) => s.trim()).filter((s) => s.length > 0); }
-function shuffle(array) { const a = array.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+
+function loadVragen() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) {
+      // opruimen oude keys (optioneel)
+      OLD_KEYS.forEach(k => localStorage.removeItem(k));
+      const seeded = seedDefaults();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      return seeded;
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      const seeded = seedDefaults();
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      return seeded;
+    }
+    return parsed.map(v => ({ id: v.id ?? crypto.randomUUID(), tekst: String(v.tekst ?? "") }));
+  } catch {
+    const seeded = seedDefaults();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+    return seeded;
+  }
+}
+
+function saveVragen(vragen) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen));
+}
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
@@ -766,7 +786,13 @@ export default function PimPamPofWeb() {
             ta.select(); document.execCommand("copy"); document.body.removeChild(ta); alert("Alle vragen zijn gekopieerd.");
         }
     }
-
+    function resetStandaardVragen() {
+        const seeded = seedDefaults();
+        saveVragen(seeded);
+        setVragen(seeded);
+        alert("Standaard vragen opnieuw geladen.");
+      }
+      
     return (
         <>
             <GlobalStyle />
@@ -859,6 +885,7 @@ export default function PimPamPofWeb() {
                                 <Row>
                                     <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
                                     <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
+                                    <Button variant="stop" onClick={resetStandaardVragen}>Reset naar standaard</Button>
                                 </Row>
                             </div>
                         </Section>
