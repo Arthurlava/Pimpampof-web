@@ -14,6 +14,8 @@ const MAX_POINTS = 200;        // max punten bij direct antwoord
 const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
 const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord
+const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
+
 
 function calcPoints(ms) {
     const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
@@ -800,6 +802,7 @@ export default function PimPamPofWeb() {
                                         <input style={styles.input} placeholder="Room code" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
                                         <Button variant="alt" onClick={joinRoom}>Join</Button>
                                         <Button onClick={startOffline}>Solo (offline)</Button>
+                                        <button className="btn alt" onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">↔️ Naar Dierenspel</button>
                                     </>
                                 )}
                             </>
