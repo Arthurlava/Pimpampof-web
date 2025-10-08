@@ -802,7 +802,7 @@ export default function PimPamPofWeb() {
                                         <input style={styles.input} placeholder="Room code" value={roomCodeInput} onChange={e => setRoomCodeInput(e.target.value.toUpperCase())} />
                                         <Button variant="alt" onClick={joinRoom}>Join</Button>
                                         <Button onClick={startOffline}>Solo (offline)</Button>
-                                        <button className="btn" onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">↔️ Naar Dierenspel</button>
+                                        <button className="alt" onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">↔️ Naar Dierenspel</button>
                                     </>
                                 )}
                             </>
