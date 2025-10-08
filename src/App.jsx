@@ -1043,8 +1043,8 @@ export default function PimPamPofWeb() {
                     </div>
                 </div>
             )}
-
-            {/* Leaderboard overlay (na Leave, gebruikt participants) */}
+{/* sdasdas*/}
+            {/* Leaderboard overlay (na Leave, gebruikt participants)*/}
             {leaderOpen && leaderData && (
                 <div className="overlay" onClick={() => setLeaderOpen(false)}>
                     <div className="card" onClick={e => e.stopPropagation()}>
