@@ -6,7 +6,6 @@ import {
     onDisconnect, remove
 } from "firebase/database";
 
-const STORAGE_KEY = "ppp.vragen";
 
 /* ---- GAME CONSTANTS (multiplayer) ---- */
 const MAX_TIME_MS = 120000;    // 2 minuten -> 0 punten
@@ -124,40 +123,57 @@ const styles = {
     foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
 };
 
-// ---- STORAGE (versioned) ----
-const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2"]; // wat jij eerder had
+// ---- STORAGE (versioned + super-robust) ----
+const STORAGE_VERSION = 4;                    // << bumpen als je iedereen opnieuw wilt seeden
+const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
+const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"]; // opruimen oude varianten
 
 function seedDefaults() {
-  return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst }));
+  // maak unieke ids zodat UI-lijsten stabiel zijn
+  return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) }));
+}
+
+function writeSeeded() {
+  const seeded = seedDefaults();
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+  return seeded;
 }
 
 function loadVragen() {
   try {
+    // oude rommel opruimen
+    OLD_KEYS.forEach((k) => localStorage.removeItem(k));
+
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) {
-      // opruimen oude keys (optioneel)
-      OLD_KEYS.forEach(k => localStorage.removeItem(k));
-      const seeded = seedDefaults();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) {
-      const seeded = seedDefaults();
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-      return seeded;
-    }
-    return parsed.map(v => ({ id: v.id ?? crypto.randomUUID(), tekst: String(v.tekst ?? "") }));
+    if (!raw) return writeSeeded();
+
+    let parsed;
+    try { parsed = JSON.parse(raw); }
+    catch { return writeSeeded(); }
+
+    if (!Array.isArray(parsed) || parsed.length === 0) return writeSeeded();
+
+    // normaliseren
+    return parsed.map((v) => ({
+      id: v?.id || crypto.randomUUID(),
+      tekst: String(v?.tekst ?? "")
+    }));
   } catch {
-    const seeded = seedDefaults();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-    return seeded;
+    return writeSeeded();
   }
 }
 
 function saveVragen(vragen) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen));
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch {}
 }
+
+// optionele reset-knop handler
+function resetStandaardVragen(setVragen) {
+  const seeded = writeSeeded();
+  setVragen(seeded);
+  alert("Standaard vragen opnieuw geladen.");
+}
+
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
