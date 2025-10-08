@@ -113,14 +113,13 @@ async function isKnownAnimal(name) {
    Firebase init
 ============================ */
 const firebaseConfig = {
-    // <-- VUL JE EIGEN CONFIG HIER IN (web API key etc.)
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR.firebaseapp.com",
-    databaseURL: "https://YOUR-RTDB-URL",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_BUCKET",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
+    authDomain: "pimpampof-aec32.firebaseapp.com",
+    databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "pimpampof-aec32",
+    storageBucket: "pimpampof-aec32.firebasestorage.app",
+    messagingSenderId: "872484746189",
+    appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
 };
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
