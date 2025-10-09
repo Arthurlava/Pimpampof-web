@@ -893,8 +893,8 @@ export default function PimPamPofWeb() {
                             <>
                                 {!online ? (
                                     <>
-                                        <span className="badge">Offline — alleen solo</span>
-                                        <Button onClick={startOffline}>Solo (offline)</Button>
+                                        <span className="badge">alleen solo</span>
+                                        <Button onClick={startOffline}>Solo Mode</Button>
                                     </>
                                 ) : (
                                     <>
@@ -987,11 +987,12 @@ export default function PimPamPofWeb() {
                     </>
                 )}
 
+
                 {/* OFFLINE SOLO speelveld */}
                 {offlineSolo && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                            <div className="badge">Offline solo</div>
+                            <div className="badge">Solo</div>
 
                             <div style={{ fontSize: 18 }}>
                                 Laatste letter: <span style={{ fontWeight: 700 }}>{offLastLetter}</span>
