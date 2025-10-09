@@ -97,7 +97,7 @@ const GlobalStyle = () => (
 );
 
 /* ---------- standaard vragen ---------- */
-const DEFAULT_VRAGEN = [ "Noem iets dat je in de koelkast vindt.", "Zeg iets dat leeft in de zee.", "Noem een dier met vier poten.",
+const DEFAULT_VRAGEN = ["Noem iets dat je in de koelkast vindt.", "Zeg iets dat leeft in de zee.", "Noem een dier met vier poten.",
     "Zeg iets dat je in een supermarkt kunt kopen.", "Zeg iets wat je in een rugzak stopt.", "Noem een sport.",
     "Noem iets wat je op je hoofd kunt dragen.", "Zeg iets dat je buiten kunt vinden.", "Noem een fruit.",
     "Noem iets wat je in een slaapkamer ziet.", "Zeg een vervoermiddel.", "Noem iets wat kinderen leuk vinden.",
@@ -115,7 +115,7 @@ const DEFAULT_VRAGEN = [ "Noem iets dat je in de koelkast vindt.", "Zeg iets dat
     "Zeg iets wat met ruimte of sterren te maken heeft.", "Zeg iets wat je kunt openen én sluiten.",
     "Noem een woord dat je doet denken aan vakantie.", "Zeg iets wat je in een bos vindt.",
     "Noem iets wat je op een camping ziet.", "Noem een machine.", "Noem iets wat stroom gebruikt.",
-    "Zeg iets wat met reizen te maken heeft.", "Noem een gevaarlijk object.", "Zeg iets dat je zelf kunt maken.",
+    "Zeg iets wat met reizen te maken heeft.", "Noem een gevaarlijk object.", "Noem iets dat je zelf kunt maken.",
     "Noem een uitvinding van de laatste 100 jaar.", "Zeg iets wat je op een markt ziet.", "Noem iets wat veel mensen verzamelen.",
     "Zeg iets wat je niet in huis wilt hebben.", "Noem iets met meerdere onderdelen.",
     "Zeg iets dat zowel in het echt als in games voorkomt.", "Noem een object dat je met beide handen moet gebruiken.",
@@ -132,7 +132,7 @@ const DEFAULT_VRAGEN = [ "Noem iets dat je in de koelkast vindt.", "Zeg iets dat
     "Noem iets dat je met muziek associeert.", "Noem iets wat in een winkelcentrum is.",
     "Noem iets wat je bij een concert vind.", "Zeg iets wat je niet aan een kind geeft.",
     "Noem iets dat je op een bord legt.", "Noem iets wat je op een feest kan vinden.", "Noem iets dat je op een kaart vindt."
- ];
+];
 
 /* ---------- styles ---------- */
 const styles = {
@@ -164,50 +164,45 @@ const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
 const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"]; // opruimen oude varianten
 
 function seedDefaults() {
-  // maak unieke ids zodat UI-lijsten stabiel zijn
-  return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) }));
+    // maak unieke ids zodat UI-lijsten stabiel zijn
+    return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) }));
 }
 
 function writeSeeded() {
-  const seeded = seedDefaults();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-  return seeded;
+    const seeded = seedDefaults();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+    return seeded;
 }
 
 function loadVragen() {
-  try {
-    // oude rommel opruimen
-    OLD_KEYS.forEach((k) => localStorage.removeItem(k));
+    try {
+        // oude rommel opruimen
+        OLD_KEYS.forEach((k) => localStorage.removeItem(k));
 
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return writeSeeded();
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return writeSeeded();
 
-    let parsed;
-    try { parsed = JSON.parse(raw); }
-    catch { return writeSeeded(); }
+        let parsed;
+        try { parsed = JSON.parse(raw); }
+        catch { return writeSeeded(); }
 
-    if (!Array.isArray(parsed) || parsed.length === 0) return writeSeeded();
+        if (!Array.isArray(parsed) || parsed.length === 0) return writeSeeded();
 
-    // normaliseren
-    return parsed.map((v) => ({
-      id: v?.id || crypto.randomUUID(),
-      tekst: String(v?.tekst ?? "")
-    }));
-  } catch {
-    return writeSeeded();
-  }
+        // normaliseren
+        return parsed.map((v) => ({
+            id: v?.id || crypto.randomUUID(),
+            tekst: String(v?.tekst ?? "")
+        }));
+    } catch {
+        return writeSeeded();
+    }
 }
 
 function saveVragen(vragen) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch (e) { e/* ignore */ }
+
 }
 
-// optionele reset-knop handler
-function resetStandaardVragen(setVragen) {
-  const seeded = writeSeeded();
-  setVragen(seeded);
-  alert("Standaard vragen opnieuw geladen.");
-}
 
 
 /* ---------- persistente speler-id + naam ---------- */
@@ -253,6 +248,27 @@ const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
 function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
 function ordinal(n) { return `${n}e`; }
+
+/* ✅ toegevoegde helpers die ontbraken (fix voor 'Room aanmaken' crash) */
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+}
+function splitInput(text) {
+    return String(text || "")
+        .split(/[\n,]+/)
+        .map(s => s.trim())
+        .filter(Boolean);
+}
+
+/* ✅ startletter: medeklinker excl. Q, X, Y, Z */
+const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
+function randomStartConsonant() {
+    return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)];
+}
 
 /* ---------- self-heal helper ---------- */
 function computeHealInfo(data) {
@@ -437,16 +453,17 @@ export default function PimPamPofWeb() {
             questions: qs,
             order,
             currentIndex: 0,
-            lastLetter: "?",
+            // ✅ start met random medeklinker (excl. Q/X/Y/Z)
+            lastLetter: randomStartConsonant(),
             turn: playerId,
             started: false,
             solo,
             jail: {},
             scores: {},
             stats: {},
-            usedLetters: {},            // (optioneel voor later, consistentie)
-            paused: false,              // ⬅️ pauze velden
-            pausedAt: null,             // ⬅️ pauze velden
+            usedLetters: {},
+            paused: false,
+            pausedAt: null,
             phase: solo ? "answer" : "answer",
             turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
@@ -486,7 +503,7 @@ export default function PimPamPofWeb() {
             if (!data.jail) data.jail = {};
             if (!data.scores) data.scores = {};
             if (!data.stats) data.stats = {};
-            if (data.paused == null) { data.paused = false; data.pausedAt = null; } // ⬅️ zorg dat de velden bestaan
+            if (data.paused == null) { data.paused = false; data.pausedAt = null; }
 
             const playerCount = Object.keys(data.players).length;
             if (playerCount >= 2 && data.solo) data.solo = false;
@@ -494,6 +511,11 @@ export default function PimPamPofWeb() {
             if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
+
+            // defensief: als room ooit met "?" is aangemaakt, herstel met medeklinker
+            if (!data.lastLetter || data.lastLetter === "?") {
+                data.lastLetter = randomStartConsonant();
+            }
             return data;
         });
 
@@ -505,10 +527,13 @@ export default function PimPamPofWeb() {
     async function startSpelOnline() {
         if (!navigator.onLine) { alert("Je bent offline — kan niet starten."); return; }
         if (!room || !isHost) { return; }
+        // behoud bestaande lastLetter; als '?' -> zet medeklinker
+        const nextStartLetter = (!room.lastLetter || room.lastLetter === "?") ? randomStartConsonant() : room.lastLetter;
+
         await update(ref(db, `rooms/${roomCode}`), {
             started: true,
             currentIndex: 0,
-            lastLetter: "?",
+            lastLetter: nextStartLetter,              // ✅ niet meer "?"
             turn: room.playersOrder?.[0] || room.hostId,
             phase: "answer",
             turnStartAt: room.solo ? null : Date.now(),
@@ -536,7 +561,7 @@ export default function PimPamPofWeb() {
         return data.turn;
     }
 
-    // ⬇️ Pauze / Hervat (zelfde mechaniek als in je dierenspel)
+    // ⬇️ Pauze / Hervat
     async function pauseGame() {
         if (!roomCode || !room) return;
         await runTransaction(ref(db, `rooms/${roomCode}`), (d) => {
@@ -552,7 +577,7 @@ export default function PimPamPofWeb() {
             if (!d || !d.paused) return d;
             const delta = Date.now() - (d.pausedAt || Date.now());
             if (d.cooldownEndAt) d.cooldownEndAt += delta;
-            if (d.turnStartAt)  d.turnStartAt  += delta;
+            if (d.turnStartAt) d.turnStartAt += delta;
             d.paused = false;
             d.pausedAt = null;
             return d;
@@ -562,7 +587,7 @@ export default function PimPamPofWeb() {
     // Antwoord indienen (alleen multiplayer geeft punten)
     async function submitLetterOnline(letter) {
         if (!room) return;
-        if (room.paused) return; // ⬅️ geen acties tijdens pauze
+        if (room.paused) return;
 
         const isMP = !!room && !room.solo;
         const elapsed = Math.max(0, Date.now() - (room?.turnStartAt ?? Date.now()));
@@ -575,7 +600,7 @@ export default function PimPamPofWeb() {
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
-            if (data.paused) return data; // ⬅️ server guard tijdens pauze
+            if (data.paused) return data;
 
             if (!data.players || !data.players[data.turn]) {
                 const ids = data.players ? Object.keys(data.players) : [];
@@ -628,13 +653,13 @@ export default function PimPamPofWeb() {
     // Jilla
     async function useJilla() {
         if (!room) return;
-        if (room.paused) return; // ⬅️ niet tijdens pauze
+        if (room.paused) return;
         const isMP = !!room && !room.solo;
 
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
-            if (data.paused) return data; // ⬅️ guard
+            if (data.paused) return data;
 
             if (!data.players || !data.players[data.turn]) return data;
             if (data.turn !== playerId) return data;
@@ -701,7 +726,8 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
+        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch (e) { e/* ignore */ }
+
     }
 
     function buildLeaderboardSnapshot(rm) {
@@ -765,7 +791,7 @@ export default function PimPamPofWeb() {
     useEffect(() => {
         if (!roomCode || !room) return;
         if (room.solo) return;
-        if (room.paused) return; // ⬅️ geen automatische overgang tijdens pauze
+        if (room.paused) return;
         if (room.phase === "cooldown" && room.cooldownEndAt && now >= room.cooldownEndAt) {
             runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
                 if (!data) return data;
@@ -798,7 +824,7 @@ export default function PimPamPofWeb() {
     function onLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
-            if (room?.paused) { e.target.value=""; return; } // ⬅️ geen input tijdens pauze
+            if (room?.paused) { e.target.value = ""; return; }
             if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
                 const required = normalizeLetter(room?.lastLetter);
                 if (required && required !== "?" && val === required) {
@@ -842,8 +868,8 @@ export default function PimPamPofWeb() {
         saveVragen(seeded);
         setVragen(seeded);
         alert("Standaard vragen opnieuw geladen.");
-      }
-      
+    }
+
     return (
         <>
             <GlobalStyle />
@@ -910,13 +936,13 @@ export default function PimPamPofWeb() {
                         )}
                         {isOnlineRoom && room?.started && (
                             <>
-                              <span className="muted">
-                                {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s cooldown)."}
-                              </span>
-                              {room.paused
-                                ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
-                                : <Button variant="alt" onClick={pauseGame}>⏸️ Pauzeer (iedereen)</Button>}
-                              {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
+                                <span className="muted">
+                                    {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s cooldown)."}
+                                </span>
+                                {room.paused
+                                    ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
+                                    : <Button variant="alt" onClick={pauseGame}>⏸️ Pauzeer (iedereen)</Button>}
+                                {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
                             </>
                         )}
                         {!online && !offlineSolo && <span className="muted">Geen internet — start Solo (offline)</span>}
@@ -937,8 +963,8 @@ export default function PimPamPofWeb() {
                                     <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
                                     <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
                                     <Button variant="stop" onClick={() => resetStandaardVragen(setVragen)}>
-  Reset naar standaard
-</Button>
+                                        Reset naar standaard
+                                    </Button>
 
                                 </Row>
                             </div>
@@ -1124,7 +1150,7 @@ export default function PimPamPofWeb() {
                     </div>
                 </div>
             )}
-{/* sdasdas*/}
+            {/* sdasdas*/}
             {/* Leaderboard overlay (na Leave, gebruikt participants)*/}
             {leaderOpen && leaderData && (
                 <div className="overlay" onClick={() => setLeaderOpen(false)}>
