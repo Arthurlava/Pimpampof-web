@@ -328,7 +328,7 @@ export default function PimPamPofWeb() {
         setOfflineSolo(true);
         setOffOrder(shuffle([...Array(qs.length).keys()]));
         setOffIndex(0);
-        setOffLastLetter("?");
+        setOffLastLetter(randomStartConsonant());
         setTimeout(() => letterRef.current?.focus(), 0);
     }
     function stopOffline() {
@@ -945,7 +945,7 @@ export default function PimPamPofWeb() {
                                 {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
                             </>
                         )}
-                        {!online && !offlineSolo && <span className="muted">Geen internet — start Solo (offline)</span>}
+                        {!online && !offlineSolo && <span className="muted">start Solo</span>}
                     </Row>
                 </header>
 
@@ -991,7 +991,7 @@ export default function PimPamPofWeb() {
                 {offlineSolo && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                            <div className="badge">Offline solo — geen internet nodig</div>
+                            <div className="badge">Offline solo</div>
 
                             <div style={{ fontSize: 18 }}>
                                 Laatste letter: <span style={{ fontWeight: 700 }}>{offLastLetter}</span>
