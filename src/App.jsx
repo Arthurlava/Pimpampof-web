@@ -6,7 +6,6 @@ import {
     onDisconnect, remove
 } from "firebase/database";
 
-
 /* ---- GAME CONSTANTS (multiplayer) ---- */
 const MAX_TIME_MS = 120000;    // 2 minuten -> 0 punten
 const MAX_POINTS = 200;        // max punten bij direct antwoord
@@ -14,6 +13,9 @@ const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
 const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord
 const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
+
+// UI/broadcast
+const JILLA_FLASH_MS = 3000;   // hoe lang de “Jilla!” banner zichtbaar is
 
 function calcPoints(ms) {
     const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
@@ -86,12 +88,18 @@ const GlobalStyle = () => (
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
     .card {
       width: min(92vw, 720px);
+      max-height: 90vh;         /* ▼ mobiel: past in viewport */
+      overflow: auto;           /* ▼ verticaal scrollen indien nodig */
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.14);
       border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35);
     }
-    .table { width:100%; border-collapse: collapse; }
-    .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
+    .table-wrap {               /* ▼ nieuwe wrapper rond table */
+      overflow-x: auto;         /* ▼ horizontaal scrollen op smalle schermen */
+      -webkit-overflow-scrolling: touch;
+    }
+    .table { width:100%; border-collapse: collapse; min-width: 520px; } /* ▼ voorkom te smal inpressen */
+    .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; white-space: nowrap; font-size: 14px; }
     .table th { font-weight: 700; }
   `}</style>
 );
@@ -200,10 +208,7 @@ function loadVragen() {
 
 function saveVragen(vragen) {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch (e) { e/* ignore */ }
-
 }
-
-
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
@@ -270,6 +275,11 @@ function randomStartConsonant() {
     return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)];
 }
 
+// Naam helper
+function nameFor(room, id) {
+    return room?.participants?.[id]?.name || room?.players?.[id]?.name || "Speler";
+}
+
 /* ---------- self-heal helper ---------- */
 function computeHealInfo(data) {
     const players = data.players ? Object.keys(data.players) : [];
@@ -328,7 +338,7 @@ export default function PimPamPofWeb() {
         setOfflineSolo(true);
         setOffOrder(shuffle([...Array(qs.length).keys()]));
         setOffIndex(0);
-        setOffLastLetter(randomStartConsonant());
+        setOffLastLetter(randomStartConsonant()); // ▼ random medeklinker
         setTimeout(() => letterRef.current?.focus(), 0);
     }
     function stopOffline() {
@@ -680,6 +690,9 @@ export default function PimPamPofWeb() {
                 s.jillaCount += 1;
                 data.stats[playerId] = s;
 
+                // ▼ broadcast voor iedereen: wie gebruikte Jilla
+                data.lastEvent = { type: "jilla", by: playerId, at: Date.now() };
+
                 data.phase = "cooldown";
                 data.cooldownEndAt = Date.now() + COOLDOWN_MS;
                 data.turnStartAt = null;
@@ -727,7 +740,6 @@ export default function PimPamPofWeb() {
         });
 
         try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch (e) { e/* ignore */ }
-
     }
 
     function buildLeaderboardSnapshot(rm) {
@@ -965,7 +977,6 @@ export default function PimPamPofWeb() {
                                     <Button variant="stop" onClick={() => resetStandaardVragen(setVragen)}>
                                         Reset naar standaard
                                     </Button>
-
                                 </Row>
                             </div>
                         </Section>
@@ -986,7 +997,6 @@ export default function PimPamPofWeb() {
                         </Section>
                     </>
                 )}
-
 
                 {/* OFFLINE SOLO speelveld */}
                 {offlineSolo && (
@@ -1025,6 +1035,13 @@ export default function PimPamPofWeb() {
                             <div className="badge">Room: <b>{roomCode}</b>
                                 <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
                             </div>
+
+                            {/* Globale Jilla banner: zichtbaar voor iedereen kort na Jilla */}
+                            {room?.lastEvent?.type === "jilla" && (now - (room.lastEvent.at || 0) < JILLA_FLASH_MS) && (
+                                <div className="jilla-banner" style={{ marginTop: 8 }}>
+                                    🔒 Jilla van <b>{nameFor(room, room.lastEvent.by)}</b> — beurt wordt overgeslagen
+                                </div>
+                            )}
 
                             {(() => {
                                 const myJ = room?.jail ? (room.jail[playerId] || 0) : 0;
@@ -1110,12 +1127,17 @@ export default function PimPamPofWeb() {
                                             key={id}
                                             style={{
                                                 ...styles.li,
-                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
+                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {}),
+                                                ...(jcount > 0 ? { border: "2px solid #fb923c", borderRadius: 12 } : {}) // ▼ extra highlight bij Jilla
                                             }}
                                         >
                                             <div style={styles.liText}>
                                                 {idx + 1}. {pName}{room?.hostId === id ? " (host)" : ""}{" "}
-                                                {jcount > 0 && <span className="badge">Jilla x{jcount}</span>}
+                                                {jcount > 0 && (
+                                                    <span className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "#fb923c" }}>
+                                                        🔒 Jilla x{jcount}
+                                                    </span>
+                                                )}
                                                 {!room.solo && <> <span style={{ margin: "0 6px" }}> </span><span className="badge">Punten: <b>{score}</b></span></>}
                                             </div>
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1151,36 +1173,38 @@ export default function PimPamPofWeb() {
                     </div>
                 </div>
             )}
-            {/* sdasdas*/}
+
             {/* Leaderboard overlay (na Leave, gebruikt participants)*/}
             {leaderOpen && leaderData && (
                 <div className="overlay" onClick={() => setLeaderOpen(false)}>
                     <div className="card" onClick={e => e.stopPropagation()}>
                         <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Leaderboard</h2>
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>Rang</th>
-                                    <th>Speler</th>
-                                    <th>Punten</th>
-                                    <th>Gem. tijd / vraag</th>
-                                    <th>Jilla</th>
-                                    <th>Dubble pof</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {leaderData.map((r, i) => (
-                                    <tr key={r.id}>
-                                        <td>{ordinal(i + 1)}</td>
-                                        <td>{r.name}</td>
-                                        <td>{r.score}</td>
-                                        <td>{r.avgMs == null ? "—" : `${(r.avgMs / 1000).toFixed(1)}s`}</td>
-                                        <td>{r.jilla}</td>
-                                        <td>{r.dpf}</td>
+                        <div className="table-wrap">
+                            <table className="table">
+                                <thead>
+                                    <tr>
+                                        <th>Rang</th>
+                                        <th>Speler</th>
+                                        <th>Punten</th>
+                                        <th>Gem. tijd / vraag</th>
+                                        <th>Jilla</th>
+                                        <th>Dubble pof</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {leaderData.map((r, i) => (
+                                        <tr key={r.id}>
+                                            <td>{ordinal(i + 1)}</td>
+                                            <td>{r.name}</td>
+                                            <td>{r.score}</td>
+                                            <td>{r.avgMs == null ? "—" : `${(r.avgMs / 1000).toFixed(1)}s`}</td>
+                                            <td>{r.jilla}</td>
+                                            <td>{r.dpf}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
                             <Button variant="alt" onClick={() => setLeaderOpen(false)}>Sluiten</Button>
                         </div>
