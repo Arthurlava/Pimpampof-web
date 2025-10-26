@@ -646,6 +646,7 @@ export default function PimPamPofWeb() {
     }
 
     // Antwoord indienen (alleen multiplayer geeft punten)
+    // Antwoord indienen (alleen multiplayer geeft punten)
     async function submitLetterOnline(letter) {
         if (!room) return;
         if (room.paused) return;
@@ -653,6 +654,7 @@ export default function PimPamPofWeb() {
         const isMP = !!room && !room.solo;
         const elapsed = Math.max(0, Date.now() - (room?.turnStartAt ?? Date.now()));
         const basePoints = isMP ? calcPoints(elapsed) : 0;
+
         const required = normalizeLetter(room?.lastLetter);
         const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
         const bonus = isMP && isDouble ? DOUBLE_POF_BONUS : 0;
@@ -688,8 +690,14 @@ export default function PimPamPofWeb() {
                 data.stats[playerId] = s;
             }
 
-            data.lastLetter = letter;
+            // ⚠️ Belangrijk: sla info op zodat we later een correctie kunnen toekennen
+            data.lastRequired = required || null;           // welke letter was vereist vóór deze zet
+            data.lastAnswerBy = playerId;                   // wie heeft net geantwoord
+            data.lastAnswerWasDouble = !!isDouble;          // had je al Dubble pof?
+
+            data.lastLetter = letter;                       // de nieuwe 'laatste letter' (voor volgende speler)
             data.currentIndex = (data.currentIndex + 1) % listLen;
+
             advanceTurnWithJail(data);
 
             if (isMP2) {
@@ -710,6 +718,58 @@ export default function PimPamPofWeb() {
             triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`, "plus");
         }
     }
+    async function changeLastLetter() {
+        if (!roomCode || !room || !room.started) return;
+
+        // simpele prompt; je kunt dit later vervangen door een mooiere modal
+        const raw = window.prompt("Nieuwe laatste letter (A–Z):", "");
+        const val = normalizeLetter(raw);
+        if (val.length !== 1) return;
+
+        // Toon de toast lokaal na afloop indien er een bonus bijkomt
+        const couldTriggerDouble =
+            !room.solo &&
+            !room.lastAnswerWasDouble &&
+            normalizeLetter(room.lastRequired) === val &&
+            (room.lastAnswerBy === playerId || room.hostId === playerId);
+
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (d) => {
+            if (!d || !d.started) return d;
+
+            // Alleen host of de speler die net antwoordde
+            const isAllowed = (d.hostId === playerId) || (d.lastAnswerBy === playerId);
+            if (!isAllowed) return d;
+
+            // wijzig alléén de laatste letter
+            d.lastLetter = val;
+
+            // Achteraf Dubble pof bonus toekennen (idempotent)
+            const required = normalizeLetter(d.lastRequired);
+            const nowDouble = required && required === val;
+            if (!d.solo && nowDouble && !d.lastAnswerWasDouble) {
+                if (!d.scores) d.scores = {};
+                d.scores[d.lastAnswerBy] = (d.scores[d.lastAnswerBy] || 0) + DOUBLE_POF_BONUS;
+
+                if (!d.stats) d.stats = {};
+                const s = d.stats[d.lastAnswerBy] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                s.doubleCount += 1;
+                d.stats[d.lastAnswerBy] = s;
+
+                d.lastAnswerWasDouble = true; // markeer als afgehandeld
+                d.lastEvent = { type: "double_pof_correction", by: d.lastAnswerBy, at: Date.now(), letter: val };
+            }
+
+            return d;
+        });
+
+        // UI feedback (optioneel, niet kritisch voor state)
+        if (couldTriggerDouble) {
+            triggerPof(`Dubble pof (correctie)! +${DOUBLE_POF_BONUS}`);
+            triggerScoreToast(`+${DOUBLE_POF_BONUS} punten (Dubble pof correctie)`, "plus");
+        }
+    }
+
 
     // Jilla
     async function useJilla() {
@@ -1065,9 +1125,14 @@ export default function PimPamPofWeb() {
                                 {room.paused
                                     ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
                                     : <Button variant="alt" onClick={pauseGame}>⏸️ Pauzeer (iedereen)</Button>}
+
+                                {/* 🔤 Verander letter (host of laatste beantwoorder kan hem gebruiken) */}
+                                <Button onClick={changeLastLetter}>🔤 Verander letter</Button>
+
                                 {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
                             </>
                         )}
+
                         {!online && !offlineSolo && <span className="muted">start Solo</span>}
                     </Row>
                 </header>
