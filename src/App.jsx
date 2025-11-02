@@ -666,7 +666,6 @@ export default function PimPamPofWeb() {
         const totalGain = basePoints + bonus;
 
         const r = ref(db, `rooms/${roomCode}`);
-        const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
             if (data.paused) return data;
