@@ -19,13 +19,6 @@ function calcPoints(ms) {
     return Math.max(0, p);
 }
 
-/* ---- ELO / RANK ---- */
-const ELO_DEFAULT = 1000;
-const ELO_K_BASE = 32;               // basis K-factor
-const PERF_CLAMP_MIN = 0.8;          // ondergrens performance multiplier
-const PERF_CLAMP_MAX = 1.2;          // bovengrens performance multiplier
-const REF_TIME_MS = Math.max(2000, Math.floor(MAX_TIME_MS / 3)); // referentie voor "snel"
-
 /* --- GLOBALE CSS + Animaties --- */
 const GlobalStyle = () => (
     <style>{`
@@ -328,46 +321,6 @@ function useOnline() {
     return online;
 }
 
-/* ---------- Elo helpers ---------- */
-function safeStats(d, pid) {
-    const s = (d.stats && d.stats[pid]) || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
-    return {
-        totalTimeMs: Number(s.totalTimeMs || 0),
-        answeredCount: Number(s.answeredCount || 0),
-        jillaCount: Number(s.jillaCount || 0),
-        doubleCount: Number(s.doubleCount || 0),
-    };
-}
-function performanceMultiplierForPid(d, pid) {
-    const s = safeStats(d, pid);
-    if (s.answeredCount <= 0) return 1.0;
-    const avgMs = s.totalTimeMs / s.answeredCount;
-
-    let timeFactor = REF_TIME_MS / Math.max(800, avgMs);
-    timeFactor = Math.pow(timeFactor, 0.35);
-
-    const doubleRate = s.doubleCount / s.answeredCount;
-    const jillaRate = s.jillaCount / s.answeredCount;
-
-    let perf = 1.0 * Math.pow(timeFactor, 0.10);
-    perf *= (1.0 + 0.20 * (doubleRate));
-    perf *= (1.0 - 0.20 * (jillaRate));
-
-    perf = Math.min(PERF_CLAMP_MAX, Math.max(PERF_CLAMP_MIN, perf));
-    return perf;
-}
-function expectedScore(ra, rb) {
-    return 1 / (1 + Math.pow(10, (rb - ra) / 400));
-}
-function ensureRatings(d) {
-    if (!d.ratings) d.ratings = {};
-    return d.ratings;
-}
-function getRating(d, pid) {
-    const ratings = ensureRatings(d);
-    return Number(ratings[pid] ?? ELO_DEFAULT);
-}
-
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
@@ -621,6 +574,59 @@ export default function PimPamPofWeb() {
         data.turn = ids[(ids.indexOf(data.turn) + 1) % ids.length];
         return data.turn;
     }
+    async function cancelLastAnswer() {
+        if (!roomCode || !room || !room.started) return;
+
+        const r = ref(db, `rooms/${roomCode}`);
+        await runTransaction(r, (d) => {
+            if (!d || !d.started) return d;
+
+            // Alleen host of de speler die de laatste antwoord-actie deed
+            const act = d.lastAction;
+            if (!act || act.type !== "answer") return d;
+            const allowed = (act.by === playerId) || (d.hostId === playerId);
+            if (!allowed) return d;
+
+            const p = act.prev || null;
+            if (!p) return d;
+
+            // 1) Herstel vraagindex, lastLetter, beurt
+            d.currentIndex = p.currentIndex;
+            d.lastLetter = p.lastLetter;
+            d.turn = p.turn;
+
+            // 2) Herstel fase/timers — timer gaat verder waar hij was
+            d.phase = p.phase || "answer";
+            d.cooldownEndAt = p.cooldownEndAt || null;
+            d.turnStartAt = p.turnStartAt || (d.solo ? null : Date.now()); // fallback
+
+            // 3) Score/statistiek terugdraaien
+            if (!d.solo && p.scoreDelta) {
+                if (!d.scores) d.scores = {};
+                d.scores[act.by] = Math.max(0, (d.scores[act.by] || 0) - p.scoreDelta);
+
+                if (!d.stats) d.stats = {};
+                const s = d.stats[act.by] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                if (p.statDelta) {
+                    s.totalTimeMs = Math.max(0, s.totalTimeMs - (p.statDelta.timeMs || 0));
+                    s.answeredCount = Math.max(0, s.answeredCount - (p.statDelta.answered || 0));
+                    if (p.statDelta.double) s.doubleCount = Math.max(0, s.doubleCount - p.statDelta.double);
+                }
+                d.stats[act.by] = s;
+            }
+
+            // 4) Herstel “laatste-actie” meta (zodat double-correcties nog kloppen)
+            d.lastRequired = p.lastRequired;
+            d.lastAnswerBy = p.lastAnswerBy;
+            d.lastAnswerWasDouble = !!p.lastAnswerWasDouble;
+
+            // 5) Maak deze undo idempotent: haal lastAction weg
+            d.lastAction = null;
+            d.lastEvent = { type: "answer_cancelled", by: playerId, at: Date.now() };
+
+            return d;
+        });
+    }
 
     // ⬇️ Pauze / Hervat
     async function pauseGame() {
@@ -646,7 +652,6 @@ export default function PimPamPofWeb() {
     }
 
     // Antwoord indienen (alleen multiplayer geeft punten)
-    // Antwoord indienen (alleen multiplayer geeft punten)
     async function submitLetterOnline(letter) {
         if (!room) return;
         if (room.paused) return;
@@ -660,6 +665,7 @@ export default function PimPamPofWeb() {
         const bonus = isMP && isDouble ? DOUBLE_POF_BONUS : 0;
         const totalGain = basePoints + bonus;
 
+        const r = ref(db, `rooms/${roomCode}`);
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
@@ -678,9 +684,28 @@ export default function PimPamPofWeb() {
             if (listLen === 0) return data;
 
             const isMP2 = !!data && !data.solo;
+
+            // ===== UNDO SNAPSHOT (pak alles wat nodig is vóórdat we wijzigen) =====
+            const prev = {
+                currentIndex: data.currentIndex,
+                lastLetter: data.lastLetter,
+                turn: data.turn,
+                phase: data.phase,
+                cooldownEndAt: data.cooldownEndAt || null,
+                turnStartAt: data.turnStartAt || null,
+                // laatste-actie-velden
+                lastRequired: data.lastRequired || null,
+                lastAnswerBy: data.lastAnswerBy || null,
+                lastAnswerWasDouble: !!data.lastAnswerWasDouble,
+                // score/statistiek (om delta straks te kunnen terugdraaien)
+                scoreDelta: isMP2 ? (basePoints + bonus) : 0,
+                statDelta: isMP2 ? { timeMs: elapsed, answered: 1, double: isDouble ? 1 : 0 } : null,
+            };
+
+            // ===== Normale mutaties (zoals je al deed) =====
             if (isMP2) {
                 if (!data.scores) data.scores = {};
-                data.scores[playerId] = (data.scores[playerId] || 0) + totalGain;
+                data.scores[playerId] = (data.scores[playerId] || 0) + (basePoints + bonus);
 
                 if (!data.stats) data.stats = {};
                 const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
@@ -690,15 +715,16 @@ export default function PimPamPofWeb() {
                 data.stats[playerId] = s;
             }
 
-            // ⚠️ Belangrijk: sla info op zodat we later een correctie kunnen toekennen
-            data.lastRequired = required || null;           // welke letter was vereist vóór deze zet
-            data.lastAnswerBy = playerId;                   // wie heeft net geantwoord
-            data.lastAnswerWasDouble = !!isDouble;          // had je al Dubble pof?
+            data.lastRequired = required || null;
+            data.lastAnswerBy = playerId;
+            data.lastAnswerWasDouble = !!isDouble;
 
-            data.lastLetter = letter;                       // de nieuwe 'laatste letter' (voor volgende speler)
+            data.lastLetter = letter;
             data.currentIndex = (data.currentIndex + 1) % listLen;
 
+            const prevTurn = data.turn;
             advanceTurnWithJail(data);
+            const nextTurn = data.turn;
 
             if (isMP2) {
                 data.phase = "cooldown";
@@ -710,8 +736,20 @@ export default function PimPamPofWeb() {
                 data.cooldownEndAt = null;
             }
 
+            // ===== Bewaar undo snapshot =====
+            data.lastAction = {
+                type: "answer",
+                by: playerId,
+                at: Date.now(),
+                prev
+            };
+
+            // optioneel: log
+            data.lastEvent = { type: "answer_submit", by: playerId, at: Date.now(), toTurn: nextTurn };
+
             return data;
         });
+
 
         if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
         if (isMP && totalGain > 0) {
@@ -741,27 +779,43 @@ export default function PimPamPofWeb() {
             const isAllowed = (d.hostId === playerId) || (d.lastAnswerBy === playerId);
             if (!isAllowed) return d;
 
-            // wijzig alléén de laatste letter
+            // wijzig alleen de laatste letter
             d.lastLetter = val;
 
-            // Achteraf Dubble pof bonus toekennen (idempotent)
             const required = normalizeLetter(d.lastRequired);
-            const nowDouble = required && required === val;
-            if (!d.solo && nowDouble && !d.lastAnswerWasDouble) {
-                if (!d.scores) d.scores = {};
-                d.scores[d.lastAnswerBy] = (d.scores[d.lastAnswerBy] || 0) + DOUBLE_POF_BONUS;
+            const nowMatches = required && required === val;
 
-                if (!d.stats) d.stats = {};
-                const s = d.stats[d.lastAnswerBy] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
-                s.doubleCount += 1;
-                d.stats[d.lastAnswerBy] = s;
+            if (!d.solo) {
+                if (nowMatches && !d.lastAnswerWasDouble) {
+                    // ✅ bonus alsnog toekennen (jouw oude gedrag)
+                    if (!d.scores) d.scores = {};
+                    d.scores[d.lastAnswerBy] = (d.scores[d.lastAnswerBy] || 0) + DOUBLE_POF_BONUS;
 
-                d.lastAnswerWasDouble = true; // markeer als afgehandeld
-                d.lastEvent = { type: "double_pof_correction", by: d.lastAnswerBy, at: Date.now(), letter: val };
+                    if (!d.stats) d.stats = {};
+                    const s = d.stats[d.lastAnswerBy] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                    s.doubleCount += 1;
+                    d.stats[d.lastAnswerBy] = s;
+
+                    d.lastAnswerWasDouble = true;
+                    d.lastEvent = { type: "double_pof_correction", by: d.lastAnswerBy, at: Date.now(), letter: val };
+                } else if (!nowMatches && d.lastAnswerWasDouble) {
+                    // ❌ bonus intrekken als het door de wijziging GEEN double meer is
+                    if (!d.scores) d.scores = {};
+                    d.scores[d.lastAnswerBy] = Math.max(0, (d.scores[d.lastAnswerBy] || 0) - DOUBLE_POF_BONUS);
+
+                    if (!d.stats) d.stats = {};
+                    const s = d.stats[d.lastAnswerBy] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+                    s.doubleCount = Math.max(0, (s.doubleCount || 0) - 1);
+                    d.stats[d.lastAnswerBy] = s;
+
+                    d.lastAnswerWasDouble = false;
+                    d.lastEvent = { type: "double_pof_revoke", by: d.lastAnswerBy, at: Date.now(), letter: val };
+                }
             }
 
             return d;
         });
+
 
         // UI feedback (optioneel, niet kritisch voor state)
         if (couldTriggerDouble) {
@@ -868,53 +922,6 @@ export default function PimPamPofWeb() {
         return arr;
     }
 
-    // 👉 Elo toepassen wanneer iemand "Leave" doet (leaver verliest, leider wint)
-    async function applyEloOnLeave(leaverId) {
-        if (!roomCode) return;
-        const r = ref(db, `rooms/${roomCode}`);
-        await runTransaction(r, (data) => {
-            if (!data || !data.players || !data.scores) return data;
-            if (!data.started || data.solo) return data;
-
-            const others = Object.keys(data.players).filter(id => id !== leaverId);
-            if (others.length === 0) return data;
-
-            let winnerId = others[0];
-            let bestScore = Number((data.scores && data.scores[winnerId]) || 0);
-            for (const id of others) {
-                const sc = Number((data.scores && data.scores[id]) || 0);
-                if (sc > bestScore) { bestScore = sc; winnerId = id; }
-            }
-
-            const ratings = ensureRatings(data);
-            const ra = getRating(data, leaverId);
-            const rb = getRating(data, winnerId);
-
-            const ea = expectedScore(ra, rb);
-            const eb = 1 - ea;
-
-            const Ka = ELO_K_BASE * performanceMultiplierForPid(data, leaverId);
-            const Kb = ELO_K_BASE * performanceMultiplierForPid(data, winnerId);
-
-            const Sa = 0; // leaver verliest
-            const Sb = 1; // leider wint
-
-            const deltaA = Math.round(Ka * (Sa - ea));
-            const deltaB = Math.round(Kb * (Sb - eb));
-
-            ratings[leaverId] = ra + deltaA;
-            ratings[winnerId] = rb + deltaB;
-
-            if (!data.lastRatingDelta) data.lastRatingDelta = {};
-            data.lastRatingDelta[leaverId] = (data.lastRatingDelta[leaverId] || 0) + deltaA;
-            data.lastRatingDelta[winnerId] = (data.lastRatingDelta[winnerId] || 0) + deltaB;
-
-            data.lastEvent = { type: "elo_on_leave", by: leaverId, to: winnerId, at: Date.now(), delta: { [leaverId]: deltaA, [winnerId]: deltaB } };
-
-            return data;
-        });
-    }
-
     async function leaveRoom() {
         if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
         const r = ref(db, `rooms/${roomCode}`);
@@ -955,10 +962,6 @@ export default function PimPamPofWeb() {
             const snap = buildLeaderboardSnapshot(room);
             setLeaderData(snap);
             setLeaderOpen(true);
-        }
-        // Elo toepassen vóór de speler echt vertrekt
-        if (room && room.started && !room.solo) {
-            try { await applyEloOnLeave(playerId); } catch (e) { console.warn("ELO apply failed:", e); }
         }
         await leaveRoom();
     }
@@ -1130,6 +1133,9 @@ export default function PimPamPofWeb() {
                                 <Button onClick={changeLastLetter}>🔤 Verander letter</Button>
 
                                 {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
+                                {room?.lastAction?.type === "answer" && (
+                                    <Button variant="stop" onClick={cancelLastAnswer}>↩️ Cancel antwoord</Button>
+                                )}
                             </>
                         )}
 
@@ -1312,8 +1318,6 @@ export default function PimPamPofWeb() {
                                         >
                                             <div style={styles.liText}>
                                                 {idx + 1}. {pName}{room?.hostId === id ? " (host)" : ""}{" "}
-                                                {/* Rank / Elo */}
-                                                <span className="badge">🏆 Elo: <b>{(room?.ratings && room.ratings[id]) ?? ELO_DEFAULT}</b></span>
                                                 {/* Laatste delta */}
                                                 {room?.lastRatingDelta && room.lastRatingDelta[id] != null && (
                                                     <span className="badge" style={{ marginLeft: 6 }}>
