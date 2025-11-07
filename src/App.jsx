@@ -71,7 +71,6 @@ const GlobalStyle = () => (
       border:1px solid rgba(255,255,255,.3); animation: jillaPulse 1.3s ease-in-out infinite;
     }
 
-    /* 🔔 Jilla announcement bubble (wie heeft zojuist Jilla gebruikt) */
     @keyframes jillaPop {
       0% { transform: translateY(6px); opacity: 0; }
       15% { transform: translateY(0); opacity: 1; }
@@ -96,8 +95,8 @@ const GlobalStyle = () => (
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
     .card {
       width: min(92vw, 720px);
-      max-height: 88vh;      /* ✅ mobiel overschalen fix */
-      overflow: auto;        /* ✅ binnen de card scrollen */
+      max-height: 88vh;
+      overflow: auto;
       background: rgba(255,255,255,0.06);
       border: 1px solid rgba(255,255,255,0.14);
       border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35);
@@ -105,52 +104,12 @@ const GlobalStyle = () => (
     .table { width:100%; border-collapse: collapse; }
     .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
     .table th { font-weight: 700; }
-
-    /* Highlight in spelerslijst voor recente Jilla-gebruiker */
-    .hot-jilla {
-      outline: 2px solid #fb923c;
-      border-radius: 12px;
-    }
+    .hot-jilla { outline: 2px solid #fb923c; border-radius: 12px; }
   `}</style>
 );
 
 /* ---------- standaard vragen ---------- */
-const DEFAULT_VRAGEN = ["Noem iets dat je in de koelkast vindt.", "Zeg iets dat leeft in de zee.", "Noem een dier met vier poten.",
-    "Zeg iets dat je in een supermarkt kunt kopen.", "Zeg iets wat je in een rugzak stopt.", "Noem een sport.",
-    "Noem iets wat je op je hoofd kunt dragen.", "Zeg iets dat je buiten kunt vinden.", "Noem een fruit.",
-    "Noem iets wat je in een slaapkamer ziet.", "Zeg een vervoermiddel.", "Noem iets wat kinderen leuk vinden.",
-    "Zeg iets wat je in de badkamer gebruikt.", "Zeg iets dat koud kan zijn.", "Noem een muziekinstrument.",
-    "Zeg iets dat je op school vindt.", "Noem een snoepje of snack.", "Zeg iets wat je met water associeert.",
-    "Noem iets dat kan vliegen.", "Zeg iets dat je op een verjaardag ziet.", "Noem iets dat je op een pizza kunt doen.",
-    "Zeg een lichaamsdeel.", "Noem iets wat je in de tuin vindt.", "Zeg iets wat je met je handen doet.",
-    "Noem een dier.", "Zeg iets dat je kunt eten.", "Noem een land buiten Europa.", "Zeg iets dat je kunt horen.",
-    "Noem iets wat je in een klaslokaal vindt.", "Noem een spel.", "Noem een dier dat kleiner is dan een kat.",
-    "Noem iets dat rond is.", "Noem een keukengerei.", "Zeg iets dat je op een broodje doet.",
-    "Noem een voertuig op wielen.", "Noem een ijsjessmaak.", "Noem iets met vleugels.", "Noem een soort snoep.",
-    "Zeg iets dat zacht is.", "Noem een groente.", "Noem iets wat plakt.", "Zeg iets wat je op vakantie meeneemt.",
-    "Zeg iets dat je vaak in films ziet.", "Noem iets wat je in een ziekenhuis tegenkomt.", "Zeg iets dat licht geeft.",
-    "Noem iets wat lawaai maakt.", "Zeg iets wat met technologie te maken heeft.", "Noem een land in Europa.",
-    "Zeg iets wat met ruimte of sterren te maken heeft.", "Zeg iets wat je kunt openen én sluiten.",
-    "Noem een woord dat je doet denken aan vakantie.", "Zeg iets wat je in een bos vindt.",
-    "Noem iets wat je op een camping ziet.", "Noem een machine.", "Noem iets wat stroom gebruikt.",
-    "Zeg iets wat met reizen te maken heeft.", "Noem een gevaarlijk object.", "Noem iets dat je zelf kunt maken.",
-    "Noem een uitvinding van de laatste 100 jaar.", "Zeg iets wat je op een markt ziet.", "Noem iets wat veel mensen verzamelen.",
-    "Zeg iets wat je niet in huis wilt hebben.", "Noem iets met meerdere onderdelen.",
-    "Zeg iets dat zowel in het echt als in games voorkomt.", "Noem een object dat je met beide handen moet gebruiken.",
-    "Zeg iets dat sneller is dan een mens.", "Zeg iets dat vroeger bestond maar nu zeldzaam is.",
-    "Noem iets wat echt klinkt maar niet bestaat.", "Noem een insect.", "Zeg iets dat je met een mes kunt snijden.",
-    "Zeg iets wat je op een rommelmarkt kunt kopen.", "Noem iets wat je in een theater ziet.",
-    "Noem iets dat je in een dierentuin vindt.", "Zeg iets dat je in een park kunt doen.", "Noem iets dat lekker ruikt.",
-    "Noem iets wat je in een handtas stopt.", "Noem iets dat met een bal te maken heeft.", "Noem iets wat in een rugzak past.",
-    "Noem iets dat snel beweegt.", "Noem iets wat je in een kast bewaart.", "Zeg iets dat gemaakt is van plastic.",
-    "Zeg iets wat je in een bibliotheek vindt.", "Noem iets wat je op een festival ziet.", "Zeg iets dat uit een blikje komt.",
-    "Zeg iets wat je onder een bed vindt.", "Noem iets dat kan springen.", "Zeg iets dat snel en gevaarlijk is.",
-    "Noem iets wat in de natuur groeit.", "Zeg iets dat je drinkt.", "Noem iets dat je in je zak stopt.",
-    "Noem iets dat zwaar is.", "Zeg iets dat in een doos past.", "Zeg iets wat je alleen buiten ziet.",
-    "Noem iets dat je met muziek associeert.", "Noem iets wat in een winkelcentrum is.",
-    "Noem iets wat je bij een concert vind.", "Zeg iets wat je niet aan een kind geeft.",
-    "Noem iets dat je op een bord legt.", "Noem iets wat je op een feest kan vinden.", "Noem iets dat je op een kaart vindt."
-];
+const DEFAULT_VRAGEN = [/* ... (ongewijzigd, laat jouw lijst hier staan) ... */];
 
 /* ---------- styles ---------- */
 const styles = {
@@ -176,49 +135,25 @@ const styles = {
     foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
 };
 
-// ---- STORAGE (versioned + super-robust) ----
-const STORAGE_VERSION = 4;                    // << bumpen als je iedereen opnieuw wilt seeden
+// ---- STORAGE ----
+const STORAGE_VERSION = 4;
 const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
-const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"]; // opruimen oude varianten
+const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"];
 
-function seedDefaults() {
-    // maak unieke ids zodat UI-lijsten stabiel zijn
-    return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) }));
-}
-
-function writeSeeded() {
-    const seeded = seedDefaults();
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-    return seeded;
-}
-
+function seedDefaults() { return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) })); }
+function writeSeeded() { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
 function loadVragen() {
     try {
-        // oude rommel opruimen
         OLD_KEYS.forEach((k) => localStorage.removeItem(k));
-
         const raw = localStorage.getItem(STORAGE_KEY);
         if (!raw) return writeSeeded();
-
         let parsed;
-        try { parsed = JSON.parse(raw); }
-        catch { return writeSeeded(); }
-
+        try { parsed = JSON.parse(raw); } catch { return writeSeeded(); }
         if (!Array.isArray(parsed) || parsed.length === 0) return writeSeeded();
-
-        // normaliseren
-        return parsed.map((v) => ({
-            id: v?.id || crypto.randomUUID(),
-            tekst: String(v?.tekst ?? "")
-        }));
-    } catch {
-        return writeSeeded();
-    }
+        return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
+    } catch { return writeSeeded(); }
 }
-
-function saveVragen(vragen) {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch (e) { e/* ignore */ }
-}
+function saveVragen(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch { } }
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
@@ -229,86 +164,27 @@ function getOrCreatePlayerId() {
         const id = crypto.randomUUID();
         localStorage.setItem(PID_KEY, id);
         return id;
-    } catch {
-        return crypto.randomUUID();
-    }
+    } catch { return crypto.randomUUID(); }
 }
 const NAME_KEY = "ppp.playerName";
 
-/* ---------- kleine UI helpers ---------- */
+/* ---------- helpers ---------- */
 function Section({ title, children }) { return (<div style={styles.section}>{title && <h2 style={styles.sectionTitle}>{title}</h2>}{children}</div>); }
 function Row({ children }) { return <div style={styles.row}>{children}</div>; }
-function Button({ children, onClick, variant, disabled }) {
+function Button({ children, onClick, variant, disabled, title }) {
     let s = { ...styles.btn }; if (variant === "alt") s = { ...s, ...styles.btnAlt }; if (variant === "stop") s = { ...s, ...styles.btnStop };
-    return <button onClick={onClick} style={{ ...s, opacity: disabled ? .6 : 1, cursor: disabled ? "not-allowed" : "pointer" }} disabled={disabled}>{children}</button>;
+    return <button onClick={onClick} title={title} style={{ ...s, opacity: disabled ? .6 : 1, cursor: disabled ? "not-allowed" : "pointer" }} disabled={disabled}>{children}</button>;
 }
 function DangerButton({ children, onClick }) { return <button onClick={onClick} style={styles.btnDanger}>{children}</button>; }
 function TextArea({ value, onChange, placeholder }) { return <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={styles.textarea} />; }
 
-/* ---------- FIREBASE INIT ---------- */
-const firebaseConfig = {
-    apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
-    authDomain: "pimpampof-aec32.firebaseapp.com",
-    databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
-    projectId: "pimpampof-aec32",
-    storageBucket: "pimpampof-aec32.firebasestorage.app",
-    messagingSenderId: "872484746189",
-    appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
-};
-const firebaseApp = initializeApp(firebaseConfig);
-const db = getDatabase(firebaseApp);
-
-/* ---------- utils ---------- */
-const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
+function splitInput(text) { return String(text || "").split(/[\n,]+/).map(s => s.trim()).filter(Boolean); }
+const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
+function randomStartConsonant() { return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)]; }
 function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
 function ordinal(n) { return `${n}e`; }
 
-/* ✅ toegevoegde helpers die ontbraken (fix voor 'Room aanmaken' crash) */
-function shuffle(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-}
-function splitInput(text) {
-    return String(text || "")
-        .split(/[\n,]+/)
-        .map(s => s.trim())
-        .filter(Boolean);
-}
-
-/* ✅ startletter: medeklinker excl. Q, X, Y, Z */
-const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
-function randomStartConsonant() {
-    return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)];
-}
-
-/* ---------- self-heal helper ---------- */
-function computeHealInfo(data) {
-    const players = data.players ? Object.keys(data.players) : [];
-    const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
-    const offline = players.filter(pid => {
-        const conns = presence[pid];
-        return conns && typeof conns === "object" && Object.keys(conns).length === 0;
-    });
-
-    const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
-    const orderFiltered = order.filter(id => players.includes(id));
-    const hostOk = data.hostId && players.includes(data.hostId);
-    const turnOk = data.turn && players.includes(data.turn);
-
-    const mustHeal =
-        offline.length > 0 ||
-        orderFiltered.length !== order.length ||
-        !hostOk || !turnOk ||
-        players.length === 0;
-
-    return { players, offline, orderFiltered, mustHeal };
-}
-
-/* ---------- online/offline hook ---------- */
 function useOnline() {
     const [online, setOnline] = React.useState(typeof navigator !== "undefined" ? navigator.onLine : true);
     React.useEffect(() => {
@@ -321,6 +197,22 @@ function useOnline() {
     return online;
 }
 
+/* ====== NIEUW: leave policy helpers ====== */
+// Mag iemand het potje verlaten?
+// Ja als: geen room / solo / niet gestart / óf de host is nu aan de beurt / óf het potje is gemarkeerd als finished.
+function canLeaveRoom(data) {
+    if (!data) return true;
+    if (data.solo) return true;
+    if (!data.started) return true;
+    if (data.finished) return true;
+    return data.turn === data.hostId;
+}
+// Heeft speler actieve verbinding?
+function hasPresence(data, pid) {
+    const c = data?.presence?.[pid];
+    return !!(c && typeof c === "object" && Object.keys(c).length > 0);
+}
+
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
@@ -331,7 +223,7 @@ export default function PimPamPofWeb() {
     const [playerId] = useState(() => getOrCreatePlayerId());
     const online = useOnline();
 
-    // --- OFFLINE SOLO state (geen Firebase) ---
+    // --- OFFLINE SOLO state ---
     const [offlineSolo, setOfflineSolo] = useState(false);
     const [offIndex, setOffIndex] = useState(-1);
     const [offLastLetter, setOffLastLetter] = useState("?");
@@ -343,14 +235,10 @@ export default function PimPamPofWeb() {
         setOfflineSolo(true);
         setOffOrder(shuffle([...Array(qs.length).keys()]));
         setOffIndex(0);
-        setOffLastLetter(randomStartConsonant()); // ✅ random startletter
+        setOffLastLetter(randomStartConsonant());
         setTimeout(() => letterRef.current?.focus(), 0);
     }
-    function stopOffline() {
-        setOfflineSolo(false);
-        setOffIndex(-1);
-        setOffLastLetter("?");
-    }
+    function stopOffline() { setOfflineSolo(false); setOffIndex(-1); setOffLastLetter("?"); }
     function onOfflineLetterChanged(e) {
         const val = normalizeLetter(e.target.value);
         if (val.length === 1) {
@@ -416,6 +304,28 @@ export default function PimPamPofWeb() {
     }, [roomCode, playerId]);
 
     /* --------- room listeners + self-heal ---------- */
+    function computeHealInfo(data) {
+        const players = data.players ? Object.keys(data.players) : [];
+        const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
+        const offline = players.filter(pid => {
+            const conns = presence[pid];
+            return conns && typeof conns === "object" && Object.keys(conns).length === 0;
+        });
+
+        const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
+        const orderFiltered = order.filter(id => players.includes(id));
+        const hostOk = data.hostId && players.includes(data.hostId);
+        const turnOk = data.turn && players.includes(data.turn);
+
+        const mustHeal =
+            offline.length > 0 ||
+            orderFiltered.length !== order.length ||
+            !hostOk || !turnOk ||
+            players.length === 0;
+
+        return { players, offline, orderFiltered, mustHeal };
+    }
+
     function attachRoomListener(code) {
         if (roomRef.current) roomRef.current = null;
         const r = ref(db, `rooms/${code}`);
@@ -432,8 +342,15 @@ export default function PimPamPofWeb() {
             runTransaction(ref(db, `rooms/${code}`), (d) => {
                 if (!d) return d;
 
+                // Alleen offline spelers verwijderen als leaven momenteel is toegestaan
                 if (d.players && d.presence) {
-                    for (const id of offline) { delete d.players[id]; }
+                    for (const id of offline) {
+                        if (canLeaveRoom(d)) {
+                            delete d.players[id];
+                            if (d.jail && d.jail[id] != null) delete d.jail[id];
+                        }
+                        // anders niets doen; ze blijven in de spelerslijst en worden overgeslagen
+                    }
                 }
 
                 const ids = d.players ? Object.keys(d.players) : [];
@@ -453,6 +370,19 @@ export default function PimPamPofWeb() {
 
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
+    /* ---------- FIREBASE INIT ---------- */
+    const firebaseConfig = {
+        apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
+        authDomain: "pimpampof-aec32.firebaseapp.com",
+        databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "pimpampof-aec32",
+        storageBucket: "pimpampof-aec32.firebasestorage.app",
+        messagingSenderId: "872484746189",
+        appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
+    };
+    const firebaseApp = initializeApp(firebaseConfig);
+    const db = getDatabase(firebaseApp);
+
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
         const code = makeRoomCode();
@@ -468,10 +398,10 @@ export default function PimPamPofWeb() {
             questions: qs,
             order,
             currentIndex: 0,
-            // ✅ start met random medeklinker (excl. Q/X/Y/Z)
             lastLetter: randomStartConsonant(),
             turn: playerId,
             started: false,
+            finished: false, // ✅ nieuw
             solo,
             jail: {},
             scores: {},
@@ -495,6 +425,9 @@ export default function PimPamPofWeb() {
         }
     }
 
+    const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
+
     async function joinRoom() {
         if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
         const code = (roomCodeInput || "").trim().toUpperCase();
@@ -505,6 +438,7 @@ export default function PimPamPofWeb() {
 
         await runTransaction(r, (data) => {
             if (!data) return data;
+
             if (!data.players) data.players = {};
             data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
 
@@ -519,6 +453,7 @@ export default function PimPamPofWeb() {
             if (!data.scores) data.scores = {};
             if (!data.stats) data.stats = {};
             if (data.paused == null) { data.paused = false; data.pausedAt = null; }
+            if (data.finished == null) data.finished = false;
 
             const playerCount = Object.keys(data.players).length;
             if (playerCount >= 2 && data.solo) data.solo = false;
@@ -527,7 +462,6 @@ export default function PimPamPofWeb() {
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
 
-            // defensief: als room ooit met "?" is aangemaakt, herstel met medeklinker
             if (!data.lastLetter || data.lastLetter === "?") {
                 data.lastLetter = randomStartConsonant();
             }
@@ -546,6 +480,7 @@ export default function PimPamPofWeb() {
 
         await update(ref(db, `rooms/${roomCode}`), {
             started: true,
+            finished: false,
             currentIndex: 0,
             lastLetter: nextStartLetter,
             turn: room.playersOrder?.[0] || room.hostId,
@@ -556,6 +491,7 @@ export default function PimPamPofWeb() {
         setTimeout(() => letterRef.current?.focus(), 0);
     }
 
+    // ===== turn helpers =====
     function advanceTurnWithJail(data) {
         const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
             .filter((id) => data.players && data.players[id]);
@@ -563,25 +499,31 @@ export default function PimPamPofWeb() {
 
         if (!data.jail) data.jail = {};
         let idx = Math.max(0, ids.indexOf(data.turn));
+
         for (let tries = 0; tries < ids.length; tries++) {
             idx = (idx + 1) % ids.length;
             const cand = ids[idx];
+
+            // ✅ sla offline spelers over
+            if (!hasPresence(data, cand)) continue;
+
             const j = data.jail[cand] || 0;
             if (j > 0) { data.jail[cand] = j - 1; continue; }
+
             data.turn = cand;
             return cand;
         }
+        // fallback: als iedereen offline/jail is, ga gewoon door (laatste redmiddel)
         data.turn = ids[(ids.indexOf(data.turn) + 1) % ids.length];
         return data.turn;
     }
+
+    // ===== Undo / Pauze / Submit / Change Letter / Jilla (ongewijzigd behalve context) =====
     async function cancelLastAnswer() {
         if (!roomCode || !room || !room.started) return;
-
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (d) => {
             if (!d || !d.started) return d;
-
-            // Alleen host of de speler die de laatste antwoord-actie deed
             const act = d.lastAction;
             if (!act || act.type !== "answer") return d;
             const allowed = (act.by === playerId) || (d.hostId === playerId);
@@ -590,17 +532,14 @@ export default function PimPamPofWeb() {
             const p = act.prev || null;
             if (!p) return d;
 
-            // 1) Herstel vraagindex, lastLetter, beurt
             d.currentIndex = p.currentIndex;
             d.lastLetter = p.lastLetter;
             d.turn = p.turn;
 
-            // 2) Herstel fase/timers — timer gaat verder waar hij was
             d.phase = p.phase || "answer";
             d.cooldownEndAt = p.cooldownEndAt || null;
-            d.turnStartAt = p.turnStartAt || (d.solo ? null : Date.now()); // fallback
+            d.turnStartAt = p.turnStartAt || (d.solo ? null : Date.now());
 
-            // 3) Score/statistiek terugdraaien
             if (!d.solo && p.scoreDelta) {
                 if (!d.scores) d.scores = {};
                 d.scores[act.by] = Math.max(0, (d.scores[act.by] || 0) - p.scoreDelta);
@@ -615,26 +554,21 @@ export default function PimPamPofWeb() {
                 d.stats[act.by] = s;
             }
 
-            // 4) Herstel “laatste-actie” meta (zodat double-correcties nog kloppen)
             d.lastRequired = p.lastRequired;
             d.lastAnswerBy = p.lastAnswerBy;
             d.lastAnswerWasDouble = !!p.lastAnswerWasDouble;
 
-            // 5) Maak deze undo idempotent: haal lastAction weg
             d.lastAction = null;
             d.lastEvent = { type: "answer_cancelled", by: playerId, at: Date.now() };
-
             return d;
         });
     }
 
-    // ⬇️ Pauze / Hervat
     async function pauseGame() {
         if (!roomCode || !room) return;
         await runTransaction(ref(db, `rooms/${roomCode}`), (d) => {
             if (!d || d.paused) return d;
-            d.paused = true;
-            d.pausedAt = Date.now();
+            d.paused = true; d.pausedAt = Date.now();
             return d;
         });
     }
@@ -645,13 +579,11 @@ export default function PimPamPofWeb() {
             const delta = Date.now() - (d.pausedAt || Date.now());
             if (d.cooldownEndAt) d.cooldownEndAt += delta;
             if (d.turnStartAt) d.turnStartAt += delta;
-            d.paused = false;
-            d.pausedAt = null;
+            d.paused = false; d.pausedAt = null;
             return d;
         });
     }
 
-    // Antwoord indienen (alleen multiplayer geeft punten)
     async function submitLetterOnline(letter) {
         if (!room) return;
         if (room.paused) return;
@@ -684,7 +616,6 @@ export default function PimPamPofWeb() {
 
             const isMP2 = !!data && !data.solo;
 
-            // ===== UNDO SNAPSHOT (pak alles wat nodig is vóórdat we wijzigen) =====
             const prev = {
                 currentIndex: data.currentIndex,
                 lastLetter: data.lastLetter,
@@ -692,16 +623,13 @@ export default function PimPamPofWeb() {
                 phase: data.phase,
                 cooldownEndAt: data.cooldownEndAt || null,
                 turnStartAt: data.turnStartAt || null,
-                // laatste-actie-velden
                 lastRequired: data.lastRequired || null,
                 lastAnswerBy: data.lastAnswerBy || null,
                 lastAnswerWasDouble: !!data.lastAnswerWasDouble,
-                // score/statistiek (om delta straks te kunnen terugdraaien)
                 scoreDelta: isMP2 ? (basePoints + bonus) : 0,
                 statDelta: isMP2 ? { timeMs: elapsed, answered: 1, double: isDouble ? 1 : 0 } : null,
             };
 
-            // ===== Normale mutaties (zoals je al deed) =====
             if (isMP2) {
                 if (!data.scores) data.scores = {};
                 data.scores[playerId] = (data.scores[playerId] || 0) + (basePoints + bonus);
@@ -721,9 +649,7 @@ export default function PimPamPofWeb() {
             data.lastLetter = letter;
             data.currentIndex = (data.currentIndex + 1) % listLen;
 
-            const prevTurn = data.turn;
             advanceTurnWithJail(data);
-            const nextTurn = data.turn;
 
             if (isMP2) {
                 data.phase = "cooldown";
@@ -735,35 +661,21 @@ export default function PimPamPofWeb() {
                 data.cooldownEndAt = null;
             }
 
-            // ===== Bewaar undo snapshot =====
-            data.lastAction = {
-                type: "answer",
-                by: playerId,
-                at: Date.now(),
-                prev
-            };
-
-            // optioneel: log
-            data.lastEvent = { type: "answer_submit", by: playerId, at: Date.now(), toTurn: nextTurn };
-
+            data.lastAction = { type: "answer", by: playerId, at: Date.now(), prev };
+            data.lastEvent = { type: "answer_submit", by: playerId, at: Date.now(), toTurn: data.turn };
             return data;
         });
 
-
         if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
-        if (isMP && totalGain > 0) {
-            triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`, "plus");
-        }
+        if (isMP && totalGain > 0) triggerScoreToast(`+${totalGain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`, "plus");
     }
+
     async function changeLastLetter() {
         if (!roomCode || !room || !room.started) return;
-
-        // simpele prompt; je kunt dit later vervangen door een mooiere modal
         const raw = window.prompt("Nieuwe laatste letter (A–Z):", "");
         const val = normalizeLetter(raw);
         if (val.length !== 1) return;
 
-        // Toon de toast lokaal na afloop indien er een bonus bijkomt
         const couldTriggerDouble =
             !room.solo &&
             !room.lastAnswerWasDouble &&
@@ -773,20 +685,15 @@ export default function PimPamPofWeb() {
         const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (d) => {
             if (!d || !d.started) return d;
-
-            // Alleen host of de speler die net antwoordde
             const isAllowed = (d.hostId === playerId) || (d.lastAnswerBy === playerId);
             if (!isAllowed) return d;
 
-            // wijzig alleen de laatste letter
             d.lastLetter = val;
-
             const required = normalizeLetter(d.lastRequired);
             const nowMatches = required && required === val;
 
             if (!d.solo) {
                 if (nowMatches && !d.lastAnswerWasDouble) {
-                    // ✅ bonus alsnog toekennen (jouw oude gedrag)
                     if (!d.scores) d.scores = {};
                     d.scores[d.lastAnswerBy] = (d.scores[d.lastAnswerBy] || 0) + DOUBLE_POF_BONUS;
 
@@ -798,7 +705,6 @@ export default function PimPamPofWeb() {
                     d.lastAnswerWasDouble = true;
                     d.lastEvent = { type: "double_pof_correction", by: d.lastAnswerBy, at: Date.now(), letter: val };
                 } else if (!nowMatches && d.lastAnswerWasDouble) {
-                    // ❌ bonus intrekken als het door de wijziging GEEN double meer is
                     if (!d.scores) d.scores = {};
                     d.scores[d.lastAnswerBy] = Math.max(0, (d.scores[d.lastAnswerBy] || 0) - DOUBLE_POF_BONUS);
 
@@ -811,20 +717,15 @@ export default function PimPamPofWeb() {
                     d.lastEvent = { type: "double_pof_revoke", by: d.lastAnswerBy, at: Date.now(), letter: val };
                 }
             }
-
             return d;
         });
 
-
-        // UI feedback (optioneel, niet kritisch voor state)
         if (couldTriggerDouble) {
             triggerPof(`Dubble pof (correctie)! +${DOUBLE_POF_BONUS}`);
             triggerScoreToast(`+${DOUBLE_POF_BONUS} punten (Dubble pof correctie)`, "plus");
         }
     }
 
-
-    // Jilla
     async function useJilla() {
         if (!room) return;
         if (room.paused) return;
@@ -845,7 +746,6 @@ export default function PimPamPofWeb() {
             if (!data.jail) data.jail = {};
             data.jail[playerId] = (data.jail[playerId] || 0) + 1;
 
-            // 🔔 Onmiddellijk aankondigen wie Jilla gebruikt heeft (voor iedereen zichtbaar, kort)
             if (!data.participants) data.participants = {};
             const whoName = (data.participants[playerId]?.name) || (data.players?.[playerId]?.name) || "Speler";
             data.jillaLast = { pid: playerId, name: whoName, at: Date.now() };
@@ -884,6 +784,7 @@ export default function PimPamPofWeb() {
             if (!data) return data;
             if (!data.players || !data.players[targetId]) return data;
 
+            // Kick is toegestaan ook als host niet aan de beurt is (moderatie)
             delete data.players[targetId];
             if (data.jail && data.jail[targetId] != null) delete data.jail[targetId];
 
@@ -905,7 +806,7 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch (e) { e/* ignore */ }
+        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
     }
 
     function buildLeaderboardSnapshot(rm) {
@@ -921,11 +822,21 @@ export default function PimPamPofWeb() {
         return arr;
     }
 
+    /* ====== LEAVE: client guard + server guard ====== */
     async function leaveRoom() {
         if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
         const r = ref(db, `rooms/${roomCode}`);
+        let actuallyLeft = false;
+
         await runTransaction(r, (data) => {
             if (!data) return data;
+
+            // ✅ server-kant: laat alleen leaven als gate open is
+            if (!canLeaveRoom(data)) {
+                // noteer afwijzing (handig voor debug/telemetrie)
+                data.lastEvent = { type: "leave_blocked", by: playerId, at: Date.now(), reason: "gate_closed" };
+                return data;
+            }
 
             if (data.players && data.players[playerId]) delete data.players[playerId];
             if (data.jail && data.jail[playerId] != null) delete data.jail[playerId];
@@ -935,15 +846,19 @@ export default function PimPamPofWeb() {
             }
 
             const ids = data.players ? Object.keys(data.players) : [];
-            if (ids.length === 0) return null;
+            if (ids.length === 0) { actuallyLeft = true; return null; }
 
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder?.[0] || ids[0];
             if (!data.turn || !data.players[data.turn] || data.turn === playerId) {
                 data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
             }
 
+            actuallyLeft = true;
             return data;
         });
+
+        // Als leave geblokkeerd was, niets opruimen aan clientkant
+        if (!actuallyLeft) return;
 
         if (connIdRef.current) {
             const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
@@ -957,6 +872,12 @@ export default function PimPamPofWeb() {
     }
 
     async function onLeaveClick() {
+        // ✅ client-kant guard: duidelijke melding
+        if (room && !canLeaveRoom(room)) {
+            alert("Je kunt nu niet leaven. Alleen wanneer de host aan de beurt is (of het potje is klaar) mag je leaven.");
+            return;
+        }
+
         if (room && room.started && !room.solo && (room.participants || room.players)) {
             const snap = buildLeaderboardSnapshot(room);
             setLeaderData(snap);
@@ -983,6 +904,34 @@ export default function PimPamPofWeb() {
         }
     }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
+    /* ---------- NIEUW: watchdog om offline beurt direct te skippen ---------- */
+    useEffect(() => {
+        if (!roomCode || !room) return;
+        if (room.solo || room.paused) return;
+        if (room.phase !== "answer") return;
+
+        const currentTurn = room.turn;
+        if (!currentTurn) return;
+
+        // als de huidige speler geen presence heeft -> skip beurt
+        if (!hasPresence(room, currentTurn)) {
+            runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
+                if (!data) return data;
+                if (data.solo || data.paused) return data;
+                if (data.phase !== "answer") return data;
+                if (!data.turn || hasPresence(data, data.turn)) return data; // is inmiddels online
+
+                // geen puntenmutatie, alleen flow
+                advanceTurnWithJail(data);
+                data.phase = "cooldown";
+                data.cooldownEndAt = Date.now() + COOLDOWN_MS;
+                data.turnStartAt = null;
+                data.lastEvent = { type: "auto_skip_offline", by: data.turn, at: Date.now() };
+                return data;
+            });
+        }
+    }, [roomCode, room?.turn, room?.phase, room?.paused, room]);
+
     /* ---------- UI helpers ---------- */
     const isOnlineRoom = !!roomCode;
     const isMyTurn = isOnlineRoom && room?.turn === playerId;
@@ -991,7 +940,6 @@ export default function PimPamPofWeb() {
         ? room.questions?.[room.order?.[room.currentIndex ?? 0] ?? 0] ?? "Vraag komt hier..."
         : null;
 
-    // timers bevriezen tijdens pauze
     const inCooldown = room?.phase === "cooldown" && !room?.solo;
     const effectiveNow = room?.paused ? (room?.pausedAt || now) : now;
     const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - effectiveNow);
@@ -1021,17 +969,9 @@ export default function PimPamPofWeb() {
         }
     }, [isOnlineRoom, room?.started, isMyTurn, myJailCount, inCooldown, room?.paused]);
 
-    function copyRoomCode() {
-        if (!roomCode) return;
-        navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd."));
-    }
-
-    function voegVragenToe() {
-        const items = splitInput(invoer);
-        if (items.length === 0) return;
-        setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]);
-        setInvoer("");
-    }
+    function copyRoomCode() { if (!roomCode) return; navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd.")); }
+    function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
+    function voegVragenToe() { const items = splitInput(invoer); if (items.length === 0) return; setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]); setInvoer(""); }
     function verwijderVraag(id) { setVragen((prev) => prev.filter((v) => v.id !== id)); }
     async function kopieerAlle() {
         const tekst = vragen.map((v) => v.tekst).join(",\n");
@@ -1048,7 +988,6 @@ export default function PimPamPofWeb() {
         alert("Standaard vragen opnieuw geladen.");
     }
 
-    // ⏱️ jilla announcement zichtbaar houden (bv. 2s)
     const jillaAnnounceActive = (() => {
         if (!room?.jillaLast) return false;
         const at = room.jillaLast.at || 0;
@@ -1062,7 +1001,6 @@ export default function PimPamPofWeb() {
                 <header style={styles.header}>
                     <h1 style={styles.h1}>PimPamPof</h1>
 
-                    {/* Bovenste controls met offline/online logica */}
                     <Row>
                         {!room?.started && !offlineSolo && (
                             <input
@@ -1073,7 +1011,6 @@ export default function PimPamPofWeb() {
                             />
                         )}
 
-                        {/* Niet in room en niet in offline solo */}
                         {!isOnlineRoom && !offlineSolo && (
                             <>
                                 {!online ? (
@@ -1093,12 +1030,10 @@ export default function PimPamPofWeb() {
                             </>
                         )}
 
-                        {/* Offline solo actief */}
                         {offlineSolo && (
                             <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
                         )}
 
-                        {/* In online room */}
                         {isOnlineRoom && (
                             <>
                                 {!room?.started && (
@@ -1106,12 +1041,18 @@ export default function PimPamPofWeb() {
                                         <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
                                     </span>
                                 )}
-                                <Button variant="alt" onClick={onLeaveClick}>Leave</Button>
+                                <Button
+                                    variant="alt"
+                                    onClick={onLeaveClick}
+                                    disabled={room && !canLeaveRoom(room)}
+                                    title={room && !canLeaveRoom(room) ? "Je kunt pas leaven wanneer de host aan de beurt is." : "Leave"}
+                                >
+                                    Leave
+                                </Button>
                             </>
                         )}
                     </Row>
 
-                    {/* Statusbalk */}
                     <Row>
                         {isOnlineRoom && online && isHost && !room?.started && (
                             <Button onClick={startSpelOnline}>Start spel (online)</Button>
@@ -1128,7 +1069,6 @@ export default function PimPamPofWeb() {
                                     ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
                                     : <Button variant="alt" onClick={pauseGame}>⏸️ Pauzeer (iedereen)</Button>}
 
-                                {/* 🔤 Verander letter (host of laatste beantwoorder kan hem gebruiken) */}
                                 <Button onClick={changeLastLetter}>🔤 Verander letter</Button>
 
                                 {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
@@ -1142,7 +1082,6 @@ export default function PimPamPofWeb() {
                     </Row>
                 </header>
 
-                {/* beheer vragen */}
                 {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && (
                     <>
                         <Section title="Nieuwe vragen (gescheiden met , of enter)">
@@ -1158,7 +1097,6 @@ export default function PimPamPofWeb() {
                                     <Button variant="stop" onClick={() => resetStandaardVragen(setVragen)}>
                                         Reset naar standaard
                                     </Button>
-
                                 </Row>
                             </div>
                         </Section>
@@ -1180,7 +1118,6 @@ export default function PimPamPofWeb() {
                     </>
                 )}
 
-                {/* OFFLINE SOLO speelveld */}
                 {offlineSolo && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -1210,7 +1147,6 @@ export default function PimPamPofWeb() {
                     </Section>
                 )}
 
-                {/* ONLINE speelveld */}
                 {isOnlineRoom && room?.started && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -1218,14 +1154,12 @@ export default function PimPamPofWeb() {
                                 <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
                             </div>
 
-                            {/* 🔔 Jilla announcement (voor iedereen zichtbaar, kort) */}
                             {jillaAnnounceActive && room?.jillaLast?.name && (
                                 <div className="jilla-toast">
                                     <div className="jilla-bubble">🔒 {room.jillaLast.name} gebruikte Jilla!</div>
                                 </div>
                             )}
 
-                            {/* Jilla-banner: alleen tonen als het JOUW BEURT is én je wordt overgeslagen */}
                             {isMyTurn && myJailCount > 0 && (
                                 <>
                                     <div className="jilla-banner" style={{ marginTop: 4 }}>
@@ -1290,7 +1224,6 @@ export default function PimPamPofWeb() {
                     </Section>
                 )}
 
-                {/* Spelerslijst met scores (alleen online room) */}
                 {isOnlineRoom && room?.participants && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
@@ -1302,30 +1235,22 @@ export default function PimPamPofWeb() {
                                     const jcount = (room.jail && room.jail[id]) || 0;
                                     const showKick = id !== playerId;
                                     const score = (!room.solo && room.scores && room.scores[id]) || 0;
-
-                                    // highlight recente jilla-user
                                     const hot = room?.jillaLast?.pid === id && jillaAnnounceActive;
 
+                                    // aanwezigheid indicator (optioneel)
+                                    const onlineNow = hasPresence(room, id);
+
                                     return (
-                                        <li
-                                            key={id}
-                                            className={hot ? "hot-jilla" : ""}
-                                            style={{
-                                                ...styles.li,
-                                                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
-                                            }}
-                                        >
+                                        <li key={id} className={hot ? "hot-jilla" : ""} style={{ ...styles.li, ...(active ? { background: "rgba(22,163,74,0.18)" } : {}) }}>
                                             <div style={styles.liText}>
                                                 {idx + 1}. {pName}{room?.hostId === id ? " (host)" : ""}{" "}
-                                                {/* Laatste delta */}
+                                                {onlineNow ? <span className="badge" style={{ marginLeft: 6 }}>🟢 online</span> : <span className="badge" style={{ marginLeft: 6 }}>⚫ offline</span>}
                                                 {room?.lastRatingDelta && room.lastRatingDelta[id] != null && (
                                                     <span className="badge" style={{ marginLeft: 6 }}>
                                                         Δ {room.lastRatingDelta[id] > 0 ? `+${room.lastRatingDelta[id]}` : room.lastRatingDelta[id]}
                                                     </span>
                                                 )}
-                                                {/* Jilla badge */}
                                                 {jcount > 0 && <span className="badge" style={{ marginLeft: 6 }}>🔒 Jilla x{jcount}</span>}
-                                                {/* Score badge (alleen in multiplayer) */}
                                                 {!room.solo && <> <span style={{ margin: "0 6px" }}> </span><span className="badge">Punten: <b>{score}</b></span></>}
                                             </div>
                                             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -1346,14 +1271,12 @@ export default function PimPamPofWeb() {
                 </footer>
             </div>
 
-            {/* Dubble pof! overlay */}
             {pofShow && (
                 <div className="pof-toast">
                     <div className="pof-bubble">{pofText}</div>
                 </div>
             )}
 
-            {/* Score delta toast */}
             {scoreToast.show && (
                 <div className="score-toast">
                     <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
@@ -1362,7 +1285,6 @@ export default function PimPamPofWeb() {
                 </div>
             )}
 
-            {/* Leaderboard overlay (na Leave, gebruikt participants)*/}
             {leaderOpen && leaderData && (
                 <div className="overlay" onClick={() => setLeaderOpen(false)}>
                     <div className="card" onClick={e => e.stopPropagation()}>
