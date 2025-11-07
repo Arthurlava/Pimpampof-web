@@ -13,6 +13,10 @@ const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
 const JILLA_PENALTY = 25;      // minpunten bij Jilla
 const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord
 const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
+// Highscore tuning (Bayesiaans, tegen korte lucky runs)
+const PRIOR_MEAN = 80;        // verwachte punten per vraag
+const PRIOR_WEIGHT = 10;      // virtuele vragen
+const MIN_ANS_FOR_BEST = 5;   // potjes met <5 antwoorden tellen niet mee voor 'beste'
 
 function calcPoints(ms) {
     const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
@@ -140,6 +144,21 @@ const STORAGE_VERSION = 4;
 const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
 const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"];
 
+
+
+/* ---------- FIREBASE INIT ---------- */
+const firebaseConfig = {
+    apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
+    authDomain: "pimpampof-aec32.firebaseapp.com",
+    databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
+    projectId: "pimpampof-aec32",
+    storageBucket: "pimpampof-aec32.firebasestorage.app",
+    messagingSenderId: "872484746189",
+    appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
+};
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getDatabase(firebaseApp);
+
 function seedDefaults() { return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) })); }
 function writeSeeded() { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
 function loadVragen() {
@@ -153,7 +172,13 @@ function loadVragen() {
         return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
     } catch { return writeSeeded(); }
 }
-function saveVragen(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch { } }
+function saveVragen(v) {
+    try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(v));
+    } catch {
+        /* ignore */
+    }
+}
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
@@ -370,18 +395,6 @@ export default function PimPamPofWeb() {
 
     function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
-    /* ---------- FIREBASE INIT ---------- */
-    const firebaseConfig = {
-        apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
-        authDomain: "pimpampof-aec32.firebaseapp.com",
-        databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
-        projectId: "pimpampof-aec32",
-        storageBucket: "pimpampof-aec32.firebasestorage.app",
-        messagingSenderId: "872484746189",
-        appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
-    };
-    const firebaseApp = initializeApp(firebaseConfig);
-    const db = getDatabase(firebaseApp);
 
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
@@ -471,6 +484,88 @@ export default function PimPamPofWeb() {
         setIsHost(false);
         setRoomCode(code);
         attachRoomListener(code);
+    }
+    // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
+    async function finishGameAndRecord() {
+        if (!roomCode || !room) return;
+        if (!isHost) { alert("Alleen de host kan het potje afronden."); return; }
+
+        const roomPath = `rooms/${roomCode}`;
+        // 1) Markeer finished (idempotent)
+        await runTransaction(ref(db, roomPath), (d) => {
+            if (!d) return d;
+            d.started = false;
+            d.finished = true;
+            d.endedAt = Date.now();
+            return d;
+        });
+
+        // 2) Pak snapshot (read-only) en schrijf match history per speler (lokaal alleen voor dit apparaat tonen)
+        const snap = await get(ref(db, roomPath));
+        if (!snap.exists()) return;
+        const rm = snap.val();
+
+        const results = [];
+        const participants = Object.keys(rm.participants || {});
+        for (const pid of participants) {
+            const name = rm.participants?.[pid]?.name || rm.players?.[pid]?.name || "Speler";
+            const score = (rm.scores?.[pid]) ?? 0;
+            const st = rm.stats?.[pid] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+            const answered = st.answeredCount || 0;
+            const avgMs = answered > 0 ? (st.totalTimeMs / answered) : null;
+
+            const adjusted = (score + PRIOR_MEAN * PRIOR_WEIGHT) / ((answered || 0) + PRIOR_WEIGHT);
+
+            results.push({ pid, name, score, answered, avgMs, adjusted });
+        }
+
+        // Sorteer op adjusted voor een nette ranking
+        results.sort((a, b) => (b.adjusted - a.adjusted) || (b.score - a.score));
+
+        // 3) Schrijf match history onder profiel van DIT apparaat (geen account nodig)
+        const myProfilePath = `profiles/${playerId}`;
+        const matchEntry = {
+            roomCode,
+            endedAt: rm.endedAt || Date.now(),
+            you: results.find(r => r.pid === playerId) || null,
+            placement: (() => {
+                const ix = results.findIndex(r => r.pid === playerId);
+                return ix >= 0 ? (ix + 1) : null;
+            })(),
+            players: results.map(r => ({
+                pid: r.pid, name: r.name, score: r.score, answered: r.answered,
+                avgMs: r.avgMs, adjusted: Number(r.adjusted.toFixed(2))
+            }))
+        };
+
+        // matches/<roomCode> (zodat meerdere potjes met zelfde code overschreven worden; wil je altijd bewaren => push met random key)
+        await set(ref(db, `${myProfilePath}/matches/${roomCode}`), matchEntry);
+
+        // 4) Update lokale highscore (best adjusted) met drempel
+        const me = matchEntry.you;
+        if (me && me.answered >= MIN_ANS_FOR_BEST) {
+            const hsRef = ref(db, `${myProfilePath}/localHighscore`);
+            await runTransaction(hsRef, (cur) => {
+                const old = cur || { bestAdjusted: 0, bestRaw: 0, bestGame: null };
+                const better = !old.bestAdjusted || me.adjusted > old.bestAdjusted;
+                if (better) {
+                    return {
+                        bestAdjusted: Number(me.adjusted.toFixed(2)),
+                        bestRaw: Number((me.score / Math.max(1, me.answered)).toFixed(2)),
+                        bestGame: {
+                            roomCode,
+                            endedAt: matchEntry.endedAt,
+                            score: me.score,
+                            answered: me.answered,
+                            placement: matchEntry.placement
+                        }
+                    };
+                }
+                return old;
+            });
+        }
+
+        alert("Potje afgerond en opgeslagen in jouw match history (dit apparaat).");
     }
 
     async function startSpelOnline() {
@@ -672,8 +767,8 @@ export default function PimPamPofWeb() {
 
     async function changeLastLetter() {
         if (!roomCode || !room || !room.started) return;
-        const raw = window.prompt("Nieuwe laatste letter (A–Z):", "");
-        const val = normalizeLetter(raw);
+        const promptVal = window.prompt("Nieuwe laatste letter (A–Z):", "");
+        const val = normalizeLetter(promptVal);
         if (val.length !== 1) return;
 
         const couldTriggerDouble =
@@ -725,6 +820,7 @@ export default function PimPamPofWeb() {
             triggerScoreToast(`+${DOUBLE_POF_BONUS} punten (Dubble pof correctie)`, "plus");
         }
     }
+
 
     async function useJilla() {
         if (!room) return;
@@ -805,8 +901,13 @@ export default function PimPamPofWeb() {
 
             return data;
         });
+        try {
+            await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`));
+        } catch {
+            /* ignore */
+        }
 
-        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
+
     }
 
     function buildLeaderboardSnapshot(rm) {
@@ -872,19 +973,30 @@ export default function PimPamPofWeb() {
     }
 
     async function onLeaveClick() {
-        // ✅ client-kant guard: duidelijke melding
-        if (room && !canLeaveRoom(room)) {
-            alert("Je kunt nu niet leaven. Alleen wanneer de host aan de beurt is (of het potje is klaar) mag je leaven.");
-            return;
+        // Als host midden in een potje: eerst afronden + history/highscore schrijven
+        if (room && isHost && room.started) {
+            await finishGameAndRecord();
+            // Na finish staat finished=true, waardoor de leave-gate open is voor iedereen.
+            // Ga daarna meteen door met leaven (geen extra prompt nodig).
+        } else {
+            // Voor niet-host of als er geen potje loopt: respecteer de leave-gate
+            if (room && !canLeaveRoom(room)) {
+                alert("Je kunt nu niet leaven. Alleen wanneer de host aan de beurt is (of het potje is klaar) mag je leaven.");
+                return;
+            }
         }
 
+        // Optioneel: leaderboard tonen bij vertrek uit een lopend multiplayer potje.
+        // (Als host hebben we zojuist al finished gezet; dit blijft een leuke summary.)
         if (room && room.started && !room.solo && (room.participants || room.players)) {
             const snap = buildLeaderboardSnapshot(room);
             setLeaderData(snap);
             setLeaderOpen(true);
         }
+
         await leaveRoom();
     }
+
 
     /* ---------- cooldown -> answer overgang (alleen multiplayer) ---------- */
     useEffect(() => {
@@ -970,7 +1082,6 @@ export default function PimPamPofWeb() {
     }, [isOnlineRoom, room?.started, isMyTurn, myJailCount, inCooldown, room?.paused]);
 
     function copyRoomCode() { if (!roomCode) return; navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd.")); }
-    function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
     function voegVragenToe() { const items = splitInput(invoer); if (items.length === 0) return; setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]); setInvoer(""); }
     function verwijderVraag(id) { setVragen((prev) => prev.filter((v) => v.id !== id)); }
     async function kopieerAlle() {
