@@ -1,4 +1,4 @@
-// src/App.jsx
+// src/App.jsx  — DEEL 1/2
 import React, { useEffect, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
@@ -97,12 +97,17 @@ const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getDatabase(firebaseApp);
 
-// Altijd anoniem inloggen
+// Altijd anoniem inloggen (en klaar-flag zetten)
+const AUTH_READY_EVENT = "ppp-auth-ready";
 onAuthStateChanged(auth, (user) => {
-  if (!user) signInAnonymously(auth).catch(console.error);
+  if (!user) {
+    signInAnonymously(auth).catch((e) => console.error("Anon sign-in failed:", e));
+  } else {
+    window.dispatchEvent(new Event(AUTH_READY_EVENT));
+  }
 });
 
-/* ---------- helpers ---------- */
+/* ---------- helper componenten/functies ---------- */
 function Section({ title, children }) { return (<div style={styles.section}>{title && <h2 style={styles.sectionTitle}>{title}</h2>}{children}</div>); }
 function Row({ children }) { return <div style={styles.row}>{children}</div>; }
 function Button({ children, onClick, variant, disabled, title }) {
@@ -156,23 +161,41 @@ export default function PimPamPofWeb() {
     try {
       OLD_KEYS.forEach((k) => localStorage.removeItem(k));
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
-      let parsed; try { parsed = JSON.parse(raw); } catch { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
-      if (!Array.isArray(parsed) || parsed.length === 0) { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
+      if (!raw) {
+        const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+        return seeded;
+      }
+      let parsed;
+      try { parsed = JSON.parse(raw); }
+      catch {
+        const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+        return seeded;
+      }
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+        return seeded;
+      }
       return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
     } catch {
       return DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
     }
   });
   const [invoer, setInvoer] = useState("");
+
   const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
   useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
 
-  // playerId = auth.uid
+  // playerId = auth.uid (wacht tot anonieme login klaar is)
   const [playerId, setPlayerId] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
   useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (user) => { if (user) setPlayerId(user.uid); });
-    return unsub;
+    const unsubAuth = onAuthStateChanged(auth, (user) => { if (user) setPlayerId(user.uid); });
+    const onReady = () => setAuthReady(true);
+    window.addEventListener(AUTH_READY_EVENT, onReady);
+    return () => { unsubAuth(); window.removeEventListener(AUTH_READY_EVENT, onReady); };
   }, []);
 
   const online = useOnline();
@@ -324,7 +347,7 @@ export default function PimPamPofWeb() {
   function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
   async function createRoom({ autoStart = false, solo = false } = {}) {
-    if (!playerId) { alert("Nog niet ingelogd (anon). Probeer zo nog eens."); return; }
+    if (!authReady || !playerId) { alert("Nog verbinding maken… probeer zo nog eens."); return; }
     if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
     const code = makeRoomCode();
     const qs = getSeedQuestions();
@@ -382,7 +405,7 @@ export default function PimPamPofWeb() {
 
   async function joinRoom() {
     if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
-    if (!playerId) { alert("Nog niet ingelogd (anon)."); return; }
+    if (!authReady || !playerId) { alert("Nog verbinding maken…"); return; }
     const code = (roomCodeInput || "").trim().toUpperCase();
     if (!code) { alert("Voer een room code in."); return; }
     const r = ref(db, `rooms/${code}`);
@@ -1099,6 +1122,8 @@ export default function PimPamPofWeb() {
       </div>
     );
   }
+// src/App.jsx — DEEL 2/2 (vervolg en afsluiting)
+
   return (
     <>
       <GlobalStyle />
@@ -1474,3 +1499,4 @@ export default function PimPamPofWeb() {
     </>
   );
 }
+
