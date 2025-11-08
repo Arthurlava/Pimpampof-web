@@ -1,23 +1,22 @@
 // src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { initializeApp } from "firebase/app";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import {
   getDatabase, ref, onValue, set, update, get, runTransaction, serverTimestamp,
   onDisconnect, remove
 } from "firebase/database";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 /* ---- GAME CONSTANTS (multiplayer) ---- */
-const MAX_TIME_MS = 120000;    // 2 minuten -> 0 punten
-const MAX_POINTS = 200;        // max punten bij direct antwoord
-const DOUBLE_POF_BONUS = 100;  // bonus voor Dubble pof!
-const JILLA_PENALTY = 25;      // minpunten bij Jilla
-const COOLDOWN_MS = 5000;      // 5s wacht na elk antwoord
+const MAX_TIME_MS = 120000;
+const MAX_POINTS = 200;
+const DOUBLE_POF_BONUS = 100;
+const JILLA_PENALTY = 25;
+const COOLDOWN_MS = 5000;
 const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
-// Highscore tuning (Bayesiaans, tegen korte lucky runs)
-const PRIOR_MEAN = 80;         // verwachte punten per vraag
-const PRIOR_WEIGHT = 10;       // virtuele vragen
-const MIN_ANS_FOR_BEST = 5;    // potjes met <5 antwoorden tellen niet mee voor 'beste'
+const PRIOR_MEAN = 80;
+const PRIOR_WEIGHT = 10;
+const MIN_ANS_FOR_BEST = 5;
 
 function calcPoints(ms) {
   const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
@@ -28,85 +27,27 @@ function calcPoints(ms) {
 const GlobalStyle = () => (
   <style>{`
     html, body, #root { height: 100%; }
-    body {
-      margin: 0;
-      background: linear-gradient(180deg, #171717 0%, #262626 100%);
-      color: #fff;
-      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-    }
-    #root {
-      width: min(100%, 720px) !important;
-      margin-left: auto !important;
-      margin-right: auto !important;
-      padding: 24px 16px;
-      box-sizing: border-box;
-      display: block !important;
-      float: none !important;
-    }
+    body { margin: 0; background: linear-gradient(180deg, #171717 0%, #262626 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px; box-sizing: border-box; display: block !important; float: none !important; }
     input, button, textarea { font-family: inherit; }
-    .badge {
-      display:inline-flex; align-items:center; gap:8px;
-      padding:6px 10px; border-radius:999px;
-      background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15);
-      font-size: 12px;
-    }
+    .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); font-size: 12px; }
     .muted { color: rgba(255,255,255,0.7); font-size:12px; }
     .mini-hud { display:flex; gap:8px; flex-wrap:wrap; }
-
-    @keyframes pofPop {
-      0%   { transform: scale(0.6); opacity: 0; }
-      20%  { transform: scale(1.12); opacity: 1; }
-      50%  { transform: scale(1.0); }
-      100% { transform: scale(0.9); opacity: 0; }
-    }
+    @keyframes pofPop { 0%{transform:scale(0.6);opacity:0;} 20%{transform:scale(1.12);opacity:1;} 50%{transform:scale(1);} 100%{transform:scale(.9);opacity:0;} }
     .pof-toast { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 9999; }
-    .pof-bubble {
-      background: radial-gradient(circle at 30% 30%, rgba(34,197,94,0.96), rgba(16,185,129,0.92));
-      padding: 18px 26px; border-radius: 999px; font-size: 28px; font-weight: 800;
-      box-shadow: 0 12px 40px rgba(0,0,0,.35); animation: pofPop 1200ms ease-out forwards; letter-spacing: .5px;
-    }
-
-    @keyframes jillaPulse {
-      0%, 100% { transform: translateY(0); box-shadow: 0 8px 24px rgba(251, 146, 60, .25); }
-      50% { transform: translateY(-2px); box-shadow: 0 12px 34px rgba(251, 146, 60, .35); }
-    }
-    .jilla-banner {
-      display:inline-flex; align-items:center; gap:10px;
-      background: linear-gradient(90deg, #f97316, #fb923c);
-      color:#111; font-weight:800; padding:10px 14px; border-radius:999px;
-      border:1px solid rgba(255,255,255,.3); animation: jillaPulse 1.3s ease-in-out infinite;
-    }
-
-    @keyframes jillaPop {
-      0% { transform: translateY(6px); opacity: 0; }
-      15% { transform: translateY(0); opacity: 1; }
-      85% { transform: translateY(0); opacity: 1; }
-      100% { transform: translateY(-6px); opacity: 0; }
-    }
+    .pof-bubble { background: radial-gradient(circle at 30% 30%, rgba(34,197,94,0.96), rgba(16,185,129,0.92)); padding: 18px 26px; border-radius: 999px; font-size: 28px; font-weight: 800; box-shadow: 0 12px 40px rgba(0,0,0,.35); animation: pofPop 1200ms ease-out forwards; letter-spacing: .5px; }
+    @keyframes jillaPulse { 0%,100%{transform:translateY(0);box-shadow:0 8px 24px rgba(251,146,60,.25);} 50%{transform:translateY(-2px);box-shadow:0 12px 34px rgba(251,146,60,.35);} }
+    .jilla-banner { display:inline-flex; align-items:center; gap:10px; background: linear-gradient(90deg, #f97316, #fb923c); color:#111; font-weight:800; padding:10px 14px; border-radius:999px; border:1px solid rgba(255,255,255,.3); animation: jillaPulse 1.3s ease-in-out infinite; }
+    @keyframes jillaPop { 0%{transform:translateY(6px);opacity:0;} 15%{transform:translateY(0);opacity:1;} 85%{transform:translateY(0);opacity:1;} 100%{transform:translateY(-6px);opacity:0;} }
     .jilla-toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; pointer-events: none; }
-    .jilla-bubble { background: linear-gradient(90deg, #fb923c, #f97316); color:#111; font-weight: 800;
-      padding: 10px 14px; border-radius: 999px; box-shadow: 0 12px 28px rgba(0,0,0,.35); animation: jillaPop 1800ms ease-out forwards; }
-
-    @keyframes scoreToast {
-      0%   { transform: translateY(8px); opacity: 0; }
-      15%  { transform: translateY(0);   opacity: 1; }
-      85%  { transform: translateY(0);   opacity: 1; }
-      100% { transform: translateY(-6px); opacity: 0; }
-    }
+    .jilla-bubble { background: linear-gradient(90deg, #fb923c, #f97316); color:#111; font-weight: 800; padding: 10px 14px; border-radius: 999px; box-shadow: 0 12px 28px rgba(0,0,0,.35); animation: jillaPop 1800ms ease-out forwards; }
+    @keyframes scoreToast { 0%{transform:translateY(8px);opacity:0;} 15%{transform:translateY(0);opacity:1;} 85%{transform:translateY(0);opacity:1;} 100%{transform:translateY(-6px);opacity:0;} }
     .score-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9999; pointer-events: none; animation: scoreToast 1400ms ease-out forwards; }
     .score-bubble { padding: 10px 14px; border-radius: 999px; font-weight: 800; box-shadow: 0 12px 28px rgba(0,0,0,.35); font-size: 16px; }
-    .score-plus  { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
+    .score-plus { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
     .score-minus { background: linear-gradient(90deg, #ef4444, #dc2626); color: #180404; }
-
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
-    .card {
-      width: min(92vw, 720px);
-      max-height: 88vh;
-      overflow: auto;
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.14);
-      border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35);
-    }
+    .card { width: min(92vw, 720px); max-height: 88vh; overflow: auto; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
     .table { width:100%; border-collapse: collapse; }
     .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
     .table th { font-weight: 700; }
@@ -115,7 +56,7 @@ const GlobalStyle = () => (
 );
 
 /* ---------- standaard vragen ---------- */
-const DEFAULT_VRAGEN = [/* ... (ongewijzigd, jouw lijst hier) ... */];
+const DEFAULT_VRAGEN = [/* ... jouw lijst ... */];
 
 /* ---------- styles ---------- */
 const styles = {
@@ -123,11 +64,7 @@ const styles = {
   header: { display: "flex", flexDirection: "column", gap: 12, alignItems: "center" },
   h1: { fontSize: 28, fontWeight: 800, margin: 0 },
   row: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", justifyContent: "center" },
-  section: {
-    width: "100%", padding: 16, borderRadius: 16,
-    background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
-    boxShadow: "0 8px 22px rgba(0,0,0,0.3)", boxSizing: "border-box",
-  },
+  section: { width: "100%", padding: 16, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 22px rgba(0,0,0,0.3)", boxSizing: "border-box" },
   sectionTitle: { margin: "0 0 8px 0", fontSize: 18, fontWeight: 700 },
   btn: { padding: "10px 16px", borderRadius: 12, border: "none", background: "#16a34a", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
   btnAlt: { background: "#065f46" }, btnStop: { background: "#475569" },
@@ -138,7 +75,7 @@ const styles = {
   li: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.1)" },
   liText: { lineHeight: 1.4, textAlign: "left" },
   letterInput: { marginTop: 8, width: 200, textAlign: "center", padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", fontSize: 16, boxSizing: "border-box" },
-  foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" },
+  foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" }
 };
 
 // ---- STORAGE ----
@@ -157,25 +94,15 @@ const firebaseConfig = {
   appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
 };
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getDatabase(firebaseApp);
 const auth = getAuth(firebaseApp);
+const db = getDatabase(firebaseApp);
+
+// Altijd anoniem inloggen
+onAuthStateChanged(auth, (user) => {
+  if (!user) signInAnonymously(auth).catch(console.error);
+});
 
 /* ---------- helpers ---------- */
-function seedDefaults() { return DEFAULT_VRAGEN.map((tekst) => ({ id: crypto.randomUUID(), tekst: String(tekst) })); }
-function writeSeeded() { const seeded = seedDefaults(); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
-function loadVragen() {
-  try {
-    OLD_KEYS.forEach((k) => localStorage.removeItem(k));
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return writeSeeded();
-    let parsed;
-    try { parsed = JSON.parse(raw); } catch { return writeSeeded(); }
-    if (!Array.isArray(parsed) || parsed.length === 0) return writeSeeded();
-    return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
-  } catch { return writeSeeded(); }
-}
-function saveVragen(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch { void 0; } }
-
 function Section({ title, children }) { return (<div style={styles.section}>{title && <h2 style={styles.sectionTitle}>{title}</h2>}{children}</div>); }
 function Row({ children }) { return <div style={styles.row}>{children}</div>; }
 function Button({ children, onClick, variant, disabled, title }) {
@@ -222,19 +149,35 @@ function hasPresence(data, pid) {
   return !!(c && typeof c === "object" && Object.keys(c).length > 0);
 }
 
+/* ---------- App ---------- */
+const NAME_KEY = "ppp.playerName";
 export default function PimPamPofWeb() {
-  const [vragen, setVragen] = useState(() => loadVragen());
+  const [vragen, setVragen] = useState(() => {
+    try {
+      OLD_KEYS.forEach((k) => localStorage.removeItem(k));
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
+      let parsed; try { parsed = JSON.parse(raw); } catch { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
+      if (!Array.isArray(parsed) || parsed.length === 0) { const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) })); localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); return seeded; }
+      return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
+    } catch {
+      return DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
+    }
+  });
   const [invoer, setInvoer] = useState("");
+  const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
+  useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
 
-  const [playerName, setPlayerName] = useState(() => localStorage.getItem("ppp.playerName") || "");
-  useEffect(() => { localStorage.setItem("ppp.playerName", playerName || ""); }, [playerName]);
-
-  // Gebruik echte auth.uid i.p.v. localStorage id
+  // playerId = auth.uid
   const [playerId, setPlayerId] = useState(null);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => { if (user) setPlayerId(user.uid); });
+    return unsub;
+  }, []);
 
   const online = useOnline();
 
-  // --- OFFLINE SOLO state ---
+  // OFFLINE SOLO
   const [offlineSolo, setOfflineSolo] = useState(false);
   const [offIndex, setOffIndex] = useState(-1);
   const [offLastLetter, setOffLastLetter] = useState("?");
@@ -242,7 +185,7 @@ export default function PimPamPofWeb() {
   const [offStartedAt, setOffStartedAt] = useState(null);
 
   function startOffline() {
-    const qs = getSeedQuestions();
+    const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
     if (!qs || qs.length === 0) { alert("Geen vragen beschikbaar."); return; }
     setOfflineSolo(true);
     setOffOrder(shuffle([...Array(qs.length).keys()]));
@@ -261,7 +204,7 @@ export default function PimPamPofWeb() {
     }
   }
 
-  // --- ONLINE room state ---
+  // ONLINE
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [roomCode, setRoomCode] = useState("");
   const [room, setRoom] = useState(null);
@@ -271,12 +214,11 @@ export default function PimPamPofWeb() {
   const letterRef = useRef(null);
   const connIdRef = useRef(null);
 
-  // Dubble pof! UI
+  // UI toasts
   const [pofShow, setPofShow] = useState(false);
   const [pofText, setPofText] = useState("Dubble pof!");
   function triggerPof(text = "Dubble pof!") { setPofText(text); setPofShow(true); setTimeout(() => setPofShow(false), 1200); }
 
-  // Score toast UI
   const [scoreToast, setScoreToast] = useState({ show: false, text: "", type: "plus" });
   function triggerScoreToast(text, type = "plus") {
     setScoreToast({ show: true, text, type });
@@ -291,22 +233,9 @@ export default function PimPamPofWeb() {
   const [leaderOpen, setLeaderOpen] = useState(false);
   const [leaderData, setLeaderData] = useState(null);
 
-  useEffect(() => { saveVragen(vragen); }, [vragen]);
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch {} }, [vragen]);
 
-  /* ---------- AUTH: anoniem inloggen ---------- */
-  useEffect(() => {
-    signInAnonymously(auth).catch(err => {
-      console.error("signInAnonymously failed:", err);
-      alert("Firebase Anonymous Auth faalt. Zet Anonymous aan in de console.");
-    });
-    const off = onAuthStateChanged(auth, (user) => {
-      setPlayerId(user?.uid ?? null);
-      console.log("Auth state:", user?.uid);
-    });
-    return () => off();
-  }, []);
-
-  /* --------- presence per room ---------- */
+  /* presence per room */
   useEffect(() => {
     if (!roomCode || !playerId) return;
     const connectedRef = ref(db, ".info/connected");
@@ -322,14 +251,14 @@ export default function PimPamPofWeb() {
     return () => {
       if (connIdRef.current) {
         const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
-        remove(myConnRef).catch(() => { void 0; });
+        remove(myConnRef).catch(() => {});
         connIdRef.current = null;
       }
       if (unsub) unsub();
     };
   }, [roomCode, playerId]);
 
-  /* --------- room listeners + self-heal ---------- */
+  /* room listeners + self-heal */
   function computeHealInfo(data) {
     const players = data.players ? Object.keys(data.players) : [];
     const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
@@ -368,7 +297,6 @@ export default function PimPamPofWeb() {
       runTransaction(ref(db, `rooms/${code}`), (d) => {
         if (!d) return d;
 
-        // Alleen offline spelers verwijderen als leaven momenteel is toegestaan
         if (d.players && d.presence) {
           for (const id of offline) {
             if (canLeaveRoom(d)) {
@@ -395,136 +323,107 @@ export default function PimPamPofWeb() {
 
   function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
 
-  /* --------- CREATE ROOM (2-staps) ---------- */
-  const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-  function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
-
   async function createRoom({ autoStart = false, solo = false } = {}) {
+    if (!playerId) { alert("Nog niet ingelogd (anon). Probeer zo nog eens."); return; }
     if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
-    if (!playerId) { alert("Geen auth.uid (Anonymous Auth?)."); return; }
-
     const code = makeRoomCode();
     const qs = getSeedQuestions();
     const order = shuffle([...Array(qs.length).keys()]);
+    const playersOrder = [playerId];
+    const obj = {
+      createdAt: serverTimestamp(),
+      hostId: playerId,
+      players: { [playerId]: { name: playerName || "Host", joinedAt: serverTimestamp() } },
+      participants: { [playerId]: { name: playerName || "Host", firstJoinedAt: serverTimestamp() } },
+      playersOrder,
+      questions: qs,
+      order,
+      currentIndex: 0,
+      lastLetter: randomStartConsonant(),
+      turn: playerId,
+      started: false,
+      finished: false,
+      solo,
+      jail: {},
+      scores: {},
+      stats: {},
+      usedLetters: {},
+      paused: false,
+      pausedAt: null,
+      phase: solo ? "answer" : "answer",
+      turnStartAt: solo ? null : Date.now(),
+      cooldownEndAt: null,
+      startedAt: null,
+      startOrder: null,
+      version: 5
+    };
+    await set(ref(db, `rooms/${code}`), obj);
+    setIsHost(true);
+    setRoomCode(code);
+    attachRoomListener(code);
 
-    try {
-      // Stap 1: word deelnemer (mag zonder read)
-      await set(ref(db, `rooms/${code}/participants/${playerId}`), {
-        name: playerName || "Host",
-        firstJoinedAt: serverTimestamp()
+    if (autoStart) {
+      const snap = await get(ref(db, `rooms/${code}`));
+      const data = snap.val() || {};
+      const initialOrder = Array.isArray(data.playersOrder)
+        ? data.playersOrder.filter(id => data.players && data.players[id])
+        : Object.keys(data.players || {});
+      await update(ref(db, `rooms/${code}`), {
+        started: true,
+        startedAt: Date.now(),
+        startOrder: initialOrder
       });
-
-      // Stap 2: nu ben je deelnemer -> parent schrijven
-      const obj = {
-        createdAt: serverTimestamp(),
-        hostId: playerId,
-        players: { [playerId]: { name: playerName || "Host", joinedAt: serverTimestamp() } },
-        playersOrder: [playerId],
-        questions: qs,
-        order,
-        currentIndex: 0,
-        lastLetter: randomStartConsonant(),
-        turn: playerId,
-        started: false,
-        finished: false,
-        solo,
-        jail: {},
-        scores: {},
-        stats: {},
-        usedLetters: {},
-        paused: false,
-        pausedAt: null,
-        phase: solo ? "answer" : "answer",
-        turnStartAt: solo ? null : Date.now(),
-        cooldownEndAt: null,
-        startedAt: null,
-        startOrder: null,
-        version: 5
-      };
-
-      await update(ref(db, `rooms/${code}`), obj);
-
-      setIsHost(true);
-      setRoomCode(code);
-      attachRoomListener(code);
-
-      if (autoStart) {
-        const snap = await get(ref(db, `rooms/${code}`));
-        const data = snap.val() || {};
-        const initialOrder = Array.isArray(data.playersOrder)
-          ? data.playersOrder.filter(id => data.players && data.players[id])
-          : Object.keys(data.players || {});
-        await update(ref(db, `rooms/${code}`), {
-          started: true,
-          startedAt: Date.now(),
-          startOrder: initialOrder
-        });
-        setTimeout(() => letterRef.current?.focus(), 0);
-      }
-    } catch (err) {
-      console.error("createRoom failed:", err);
-      alert(`Room aanmaken mislukt: ${err?.code || err?.message || err}`);
+      setTimeout(() => letterRef.current?.focus(), 0);
     }
   }
 
-  /* --------- JOIN (zonder pre-read) ---------- */
+  const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+  function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * (CODE_CHARS.length))]; return s; }
+
   async function joinRoom() {
     if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
-    if (!playerId) { alert("Geen auth.uid"); return; }
+    if (!playerId) { alert("Nog niet ingelogd (anon)."); return; }
     const code = (roomCodeInput || "").trim().toUpperCase();
     if (!code) { alert("Voer een room code in."); return; }
+    const r = ref(db, `rooms/${code}`);
+    const snap = await get(r);
+    if (!snap.exists()) { alert("Room niet gevonden."); return; }
 
-    try {
-      // 1) Eerst participant worden
-      await set(ref(db, `rooms/${code}/participants/${playerId}`), {
-        name: playerName || "Speler",
-        firstJoinedAt: serverTimestamp()
-      });
+    await runTransaction(r, (data) => {
+      if (!data) return data;
 
-      // 2) Nu mag je room muteren
-      await runTransaction(ref(db, `rooms/${code}`), (data) => {
-        if (!data) return data; // room bestaat niet
-        if (!data.players) data.players = {};
-        data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
+      if (!data.players) data.players = {};
+      data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
 
-        if (!data.participants) data.participants = {};
-        data.participants[playerId] = data.participants[playerId] || { name: playerName || "Speler", firstJoinedAt: serverTimestamp() };
-        data.participants[playerId].name = playerName || data.participants[playerId].name;
+      if (!data.participants) data.participants = {};
+      data.participants[playerId] = data.participants[playerId] || { name: playerName || "Speler", firstJoinedAt: serverTimestamp() };
+      data.participants[playerId].name = playerName || data.participants[playerId].name;
 
-        if (!data.playersOrder) data.playersOrder = [];
-        if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
+      if (!data.playersOrder) data.playersOrder = [];
+      if (!data.playersOrder.includes(playerId)) data.playersOrder.push(playerId);
 
-        if (!data.jail) data.jail = {};
-        if (!data.scores) data.scores = {};
-        if (!data.stats) data.stats = {};
-        if (data.paused == null) { data.paused = false; data.pausedAt = null; }
-        if (data.finished == null) data.finished = false;
+      if (!data.jail) data.jail = {};
+      if (!data.scores) data.scores = {};
+      if (!data.stats) data.stats = {};
+      if (data.paused == null) { data.paused = false; data.pausedAt = null; }
+      if (data.finished == null) data.finished = false;
 
-        const playerCount = Object.keys(data.players).length;
-        if (playerCount >= 2 && data.solo) data.solo = false;
+      const playerCount = Object.keys(data.players).length;
+      if (playerCount >= 2 && data.solo) data.solo = false;
 
-        if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
-        if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
-        if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
+      if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
+      if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
+      if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
 
-        if (!data.lastLetter || data.lastLetter === "?") data.lastLetter = randomStartConsonant();
-        return data;
-      });
+      if (!data.lastLetter || data.lastLetter === "?") data.lastLetter = randomStartConsonant();
+      return data;
+    });
 
-      setIsHost(false);
-      setRoomCode(code);
-      attachRoomListener(code);
-    } catch (err) {
-      console.error("joinRoom failed:", err);
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
-        alert("Geen toegang. Bestaat de room-code? En is Anonymous Auth aan?");
-      } else {
-        alert(`Join mislukt: ${err?.code || err?.message || err}`);
-      }
-    }
+    setIsHost(false);
+    setRoomCode(code);
+    attachRoomListener(code);
   }
 
-  /* --------- Finish + Profile logging ---------- */
   async function finishGameAndRecord() {
     if (!roomCode || !room) return;
     if (!isHost) { alert("Alleen de host kan het potje afronden."); return; }
@@ -562,20 +461,8 @@ export default function PimPamPofWeb() {
       roomCode,
       endedAt: rm.endedAt || Date.now(),
       you: results.find(r => r.pid === playerId) || null,
-      placement: (() => {
-        const ix = results.findIndex(r => r.pid === playerId);
-        return ix >= 0 ? (ix + 1) : null;
-      })(),
-      players: results.map(r => ({
-        pid: r.pid,
-        name: r.name,
-        score: r.score,
-        answered: r.answered,
-        avgMs: r.avgMs,
-        adjusted: Number(r.adjusted.toFixed(2)),
-        jilla: r.jilla,
-        dpf: r.dpf
-      }))
+      placement: (() => { const ix = results.findIndex(r => r.pid === playerId); return ix >= 0 ? (ix + 1) : null; })(),
+      players: results.map(r => ({ pid: r.pid, name: r.name, score: r.score, answered: r.answered, avgMs: r.avgMs, adjusted: Number(r.adjusted.toFixed(2)), jilla: r.jilla, dpf: r.dpf }))
     };
 
     await set(ref(db, `${myProfilePath}/matches/${roomCode}`), matchEntry);
@@ -590,13 +477,7 @@ export default function PimPamPofWeb() {
           return {
             bestAdjusted: Number(me.adjusted.toFixed(2)),
             bestRaw: Number((me.score / Math.max(1, me.answered)).toFixed(2)),
-            bestGame: {
-              roomCode,
-              endedAt: matchEntry.endedAt,
-              score: me.score,
-              answered: me.answered,
-              placement: matchEntry.placement
-            }
+            bestGame: { roomCode, endedAt: matchEntry.endedAt, score: me.score, answered: me.answered, placement: matchEntry.placement }
           };
         }
         return old;
@@ -657,7 +538,7 @@ export default function PimPamPofWeb() {
     if (!roomCode || !room || !room.started) return;
     const r = ref(db, `rooms/${roomCode}`);
     await runTransaction(r, (d) => {
-      if (!d || !d.started) return d;
+      if (!d || d.started === false) return d;
       const act = d.lastAction;
       if (!act || act.type !== "answer") return d;
       const allowed = (act.by === playerId) || (d.hostId === playerId);
@@ -697,7 +578,6 @@ export default function PimPamPofWeb() {
       return d;
     });
   }
-
   async function pauseGame() {
     if (!roomCode || !room) return;
     await runTransaction(ref(db, `rooms/${roomCode}`), (d) => {
@@ -939,7 +819,7 @@ export default function PimPamPofWeb() {
       return data;
     });
 
-    try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { void 0; }
+    try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch {}
   }
 
   function buildLeaderboardSnapshot(rm) {
@@ -955,7 +835,6 @@ export default function PimPamPofWeb() {
     return arr;
   }
 
-  /* ====== LEAVE ====== */
   async function leaveRoom() {
     if (!roomCode) { setRoom(null); setRoomCode(""); setIsHost(false); return; }
     const r = ref(db, `rooms/${roomCode}`);
@@ -988,9 +867,11 @@ export default function PimPamPofWeb() {
       return data;
     });
 
-  if (actuallyLeft && connIdRef.current) {
+    if (!actuallyLeft) return;
+
+    if (connIdRef.current) {
       const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
-      remove(myConnRef).catch(() => { void 0; });
+      remove(myConnRef).catch(() => {});
       connIdRef.current = null;
     }
 
@@ -1018,7 +899,7 @@ export default function PimPamPofWeb() {
     await leaveRoom();
   }
 
-  /* ---------- cooldown -> answer overgang ---------- */
+  /* cooldown -> answer */
   useEffect(() => {
     if (!roomCode || !room) return;
     if (room.solo) return;
@@ -1036,7 +917,7 @@ export default function PimPamPofWeb() {
     }
   }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
-  /* ---------- watchdog: skip offline beurt ---------- */
+  /* watchdog: skip offline beurt */
   useEffect(() => {
     if (!roomCode || !room) return;
     if (room.solo || room.paused) return;
@@ -1062,7 +943,7 @@ export default function PimPamPofWeb() {
     }
   }, [roomCode, room?.turn, room?.phase, room?.paused, room]);
 
-  /* ---------- UI helpers ---------- */
+  /* UI helpers voor render */
   const isOnlineRoom = !!roomCode;
   const isMyTurn = isOnlineRoom && room?.turn === playerId;
   const myJailCount = isOnlineRoom && room?.jail ? (room.jail[playerId] || 0) : 0;
@@ -1079,8 +960,8 @@ export default function PimPamPofWeb() {
 
   const roundSize = (isOnlineRoom && room?.started)
     ? Math.max(1, Array.isArray(room?.startOrder) && room.startOrder.length > 0
-        ? room.startOrder.length
-        : Object.keys(room?.players || {}).length || 1)
+      ? room.startOrder.length
+      : Object.keys(room?.players || {}).length || 1)
     : 1;
 
   const currentRound = isOnlineRoom
@@ -1112,8 +993,16 @@ export default function PimPamPofWeb() {
     }
   }, [isOnlineRoom, room?.started, isMyTurn, myJailCount, inCooldown, room?.paused]);
 
-  function copyRoomCode() { if (!roomCode) return; navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd.")); }
-  function voegVragenToe() { const items = splitInput(invoer); if (items.length === 0) return; setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]); setInvoer(""); }
+  function copyRoomCode() {
+    if (!roomCode) return;
+    navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd."));
+  }
+  function voegVragenToe() {
+    const items = splitInput(invoer);
+    if (items.length === 0) return;
+    setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]);
+    setInvoer("");
+  }
   function verwijderVraag(id) { setVragen((prev) => prev.filter((v) => v.id !== id)); }
   async function kopieerAlle() {
     const tekst = vragen.map((v) => v.tekst).join(",\n");
@@ -1124,8 +1013,8 @@ export default function PimPamPofWeb() {
     }
   }
   function resetStandaardVragen() {
-    const seeded = seedDefaults();
-    saveVragen(seeded);
+    const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); } catch {}
     setVragen(seeded);
     alert("Standaard vragen opnieuw geladen.");
   }
@@ -1136,7 +1025,7 @@ export default function PimPamPofWeb() {
     return now - at < 2000;
   })();
 
-  /* ===== Profiel (match history + highscore) ===== */
+  /* Profiel (match history + highscore) */
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   useEffect(() => {
@@ -1151,15 +1040,12 @@ export default function PimPamPofWeb() {
     const matches = profile?.matches ? Object.values(profile.matches) : [];
     matches.sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
     const hs = profile?.localHighscore || null;
-
     const fmt = (ts) => { try { return new Date(ts).toLocaleString(); } catch { return "—"; } };
     const ordinal = (n) => `${n}e`;
-
     return (
       <div className="overlay" onClick={() => setProfileOpen(false)}>
         <div className="card" onClick={(e) => e.stopPropagation()}>
           <h2 style={{ marginTop: 0, marginBottom: 6 }}>📜 Profiel</h2>
-
           <div style={{ marginBottom: 12 }}>
             <h3 style={{ margin: "8px 0" }}>🏅 Highscore</h3>
             {hs ? (
@@ -1177,7 +1063,6 @@ export default function PimPamPofWeb() {
               <div className="muted">Nog geen highscore opgeslagen.</div>
             )}
           </div>
-
           <h3 style={{ margin: "8px 0" }}>📅 Match history</h3>
           {matches.length === 0 ? (
             <div className="muted">Nog geen gespeelde potjes opgeslagen.</div>
@@ -1186,13 +1071,7 @@ export default function PimPamPofWeb() {
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Datum</th>
-                    <th>Resultaat</th>
-                    <th>Punten</th>
-                    <th>Gem. tijd / vraag</th>
-                    <th>Jilla</th>
-                    <th>Dubble pof</th>
-                    <th>Deelnemers</th>
+                    <th>Datum</th><th>Resultaat</th><th>Punten</th><th>Gem. tijd / vraag</th><th>Jilla</th><th>Dubble pof</th><th>Deelnemers</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1202,16 +1081,10 @@ export default function PimPamPofWeb() {
                     const result = placement === 1 ? "Gewonnen" : (placement ? ordinal(placement) : "—");
                     const avgSecs = you.avgMs == null ? "—" : `${(you.avgMs / 1000).toFixed(1)}s`;
                     const names = Array.isArray(m.players) ? m.players.map(p => p.name).join(", ") : "—";
-
                     return (
                       <tr key={`${m.roomCode || "room"}-${m.endedAt || Math.random()}`}>
-                        <td>{fmt(m.endedAt)}</td>
-                        <td>{result}</td>
-                        <td>{you.score}{you.answered ? ` / ${you.answered}` : ""}</td>
-                        <td>{avgSecs}</td>
-                        <td>{you.jilla ?? 0}</td>
-                        <td>{you.dpf ?? 0}</td>
-                        <td>{names}</td>
+                        <td>{fmt(m.endedAt)}</td><td>{result}</td><td>{you.score}{you.answered ? ` / ${you.answered}` : ""}</td>
+                        <td>{avgSecs}</td><td>{you.jilla ?? 0}</td><td>{you.dpf ?? 0}</td><td>{names}</td>
                       </tr>
                     );
                   })}
@@ -1219,7 +1092,6 @@ export default function PimPamPofWeb() {
               </table>
             </div>
           )}
-
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
             <Button variant="alt" onClick={() => setProfileOpen(false)}>Sluiten</Button>
           </div>
@@ -1227,8 +1099,6 @@ export default function PimPamPofWeb() {
       </div>
     );
   }
-
-  /* ---------------- RENDER / JSX ---------------- */
   return (
     <>
       <GlobalStyle />
@@ -1237,6 +1107,7 @@ export default function PimPamPofWeb() {
           <h1 style={styles.h1}>PimPamPof</h1>
 
           <Row>
+            {/* Naamveld tonen als er geen spel bezig is */}
             {!room?.started && !offlineSolo && (
               <input
                 style={styles.input}
@@ -1246,8 +1117,8 @@ export default function PimPamPofWeb() {
               />
             )}
 
-            {/* Startscherm knoppen */}
-            {!Boolean(roomCode) && !offlineSolo && (
+            {/* Startscherm (geen room, geen solo) */}
+            {!isOnlineRoom && !offlineSolo && (
               <>
                 {!online ? (
                   <>
@@ -1259,8 +1130,6 @@ export default function PimPamPofWeb() {
                     <Button
                       variant="alt"
                       onClick={() => createRoom({ autoStart: false, solo: false })}
-                      disabled={!playerId}
-                      title={!playerId ? "Even wachten op Anonymous Auth…" : "Maak een room"}
                     >
                       Room aanmaken
                     </Button>
@@ -1270,30 +1139,30 @@ export default function PimPamPofWeb() {
                       value={roomCodeInput}
                       onChange={e => setRoomCodeInput(e.target.value.toUpperCase())}
                     />
-                    <Button
-                      variant="alt"
-                      onClick={joinRoom}
-                      disabled={!playerId}
-                      title={!playerId ? "Even wachten op Anonymous Auth…" : "Join met code"}
-                    >
-                      Join
-                    </Button>
+                    <Button variant="alt" onClick={joinRoom}>Join</Button>
                     <Button onClick={startOffline}>Solo (offline)</Button>
-                    <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">↔️ Naar Dierenspel</Button>
+                    <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">
+                      ↔️ Naar Dierenspel
+                    </Button>
                   </>
                 )}
               </>
             )}
 
+            {/* Solo actief */}
             {offlineSolo && (
               <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
             )}
 
-            {Boolean(roomCode) && (
+            {/* In een room */}
+            {isOnlineRoom && (
               <>
                 {!room?.started && (
-                  <span className="badge">Room: <b>{roomCode}</b>
-                    <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px" }}>Kopieer</button>
+                  <span className="badge">
+                    Room: <b>{roomCode}</b>
+                    <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>
+                      Kopieer
+                    </button>
                   </span>
                 )}
                 <Button
@@ -1311,13 +1180,13 @@ export default function PimPamPofWeb() {
           </Row>
 
           <Row>
-            {Boolean(roomCode) && online && isHost && !room?.started && (
+            {isOnlineRoom && online && isHost && !room?.started && (
               <Button onClick={startSpelOnline}>Start spel (online)</Button>
             )}
-            {Boolean(roomCode) && online && !isHost && !room?.started && (
+            {isOnlineRoom && online && !isHost && !room?.started && (
               <span className="muted">Wachten op host…</span>
             )}
-            {Boolean(roomCode) && room?.started && (
+            {isOnlineRoom && room?.started && (
               <>
                 <span className="muted">
                   {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s cooldown)."}
@@ -1332,11 +1201,12 @@ export default function PimPamPofWeb() {
                 )}
               </>
             )}
+
             {!online && !offlineSolo && <span className="muted">start Solo</span>}
           </Row>
 
-          {/* Mini-HUD */}
-          {(offlineSolo || (Boolean(roomCode) && room?.started)) && (
+          {/* Mini-HUD (ronde + duur) */}
+          {(offlineSolo || (isOnlineRoom && room?.started)) && (
             <div className="mini-hud" style={{ marginTop: 6 }}>
               <span className="badge">🧭 Ronde: <b>{currentRound}</b></span>
               <span className="badge">⏳ Duur <b>{fmtDuration(matchDurationMs)}</b></span>
@@ -1344,8 +1214,8 @@ export default function PimPamPofWeb() {
           )}
         </header>
 
-        {/* Beheer vragen (alleen vóór start en niet in offlineSolo en alleen buiten een room of host vóór start) */}
-        {(!Boolean(roomCode) || (Boolean(roomCode) && isHost && !room?.started)) && !offlineSolo && (
+        {/* Vraagbeheer (alleen wanneer er geen spel loopt of host pre-game) */}
+        {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && (
           <>
             <Section title="Nieuwe vragen (gescheiden met , of enter)">
               <TextArea
@@ -1357,7 +1227,7 @@ export default function PimPamPofWeb() {
                 <Row>
                   <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
                   <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
-                  <Button variant="stop" onClick={() => resetStandaardVragen(setVragen)}>
+                  <Button variant="stop" onClick={resetStandaardVragen}>
                     Reset naar standaard
                   </Button>
                 </Row>
@@ -1381,7 +1251,7 @@ export default function PimPamPofWeb() {
           </>
         )}
 
-        {/* Offline solo */}
+        {/* Solo (offline) UI */}
         {offlineSolo && (
           <Section>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -1392,7 +1262,7 @@ export default function PimPamPofWeb() {
               </div>
               <div style={{ fontSize: 22, minHeight: "3rem" }}>
                 {(() => {
-                  const qs = getSeedQuestions();
+                  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
                   const qIdx = offOrder[offIndex] ?? 0;
                   return qs[qIdx] ?? "Vraag komt hier...";
                 })()}
@@ -1411,20 +1281,32 @@ export default function PimPamPofWeb() {
           </Section>
         )}
 
-        {/* Online spel */}
-        {Boolean(roomCode) && room?.started && (
+        {/* Online game UI */}
+        {isOnlineRoom && room?.started && (
           <Section>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-              <div className="badge">Room: <b>{roomCode}</b>
-                <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
+              <div className="badge">
+                Room: <b>{roomCode}</b>
+                <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>
+                  Kopieer
+                </button>
               </div>
 
-              {jillaAnnounceActive && room?.jillaLast?.name && (
-                <div className="jilla-toast">
-                  <div className="jilla-bubble">🔒 {room.jillaLast.name} gebruikte Jilla!</div>
-                </div>
-              )}
+              {/* Jilla toast */}
+              {(() => {
+                const active = (() => {
+                  if (!room?.jillaLast) return false;
+                  const at = room.jillaLast.at || 0;
+                  return Date.now() - at < 2000;
+                })();
+                return active && room?.jillaLast?.name ? (
+                  <div className="jilla-toast">
+                    <div className="jilla-bubble">🔒 {room.jillaLast.name} gebruikte Jilla!</div>
+                  </div>
+                ) : null;
+              })()}
 
+              {/* Jilla banner als het jouw beurt is en je in 'jail' zit */}
               {isMyTurn && myJailCount > 0 && (
                 <>
                   <div className="jilla-banner" style={{ marginTop: 4 }}>
@@ -1469,10 +1351,10 @@ export default function PimPamPofWeb() {
                     : !isMyTurn
                       ? "Niet jouw beurt"
                       : (myJailCount > 0
-                          ? "Jilla actief — jouw beurt wordt overgeslagen"
-                          : (inCooldown
-                              ? "Wachten… ronde start zo"
-                              : "Jouw beurt — typ de laatste letter…"))
+                        ? "Jilla actief — jouw beurt wordt overgeslagen"
+                        : (inCooldown
+                          ? "Wachten… ronde start zo"
+                          : "Jouw beurt — typ de laatste letter…"))
                 }
                 disabled={!isMyTurn || myJailCount > 0 || inCooldown || room?.paused}
                 style={{ ...styles.letterInput, opacity: (isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused) ? 1 : 0.5 }}
@@ -1490,7 +1372,7 @@ export default function PimPamPofWeb() {
         )}
 
         {/* Spelerslijst */}
-        {Boolean(roomCode) && room?.participants && (
+        {isOnlineRoom && room?.participants && (
           <Section title="Spelers">
             <ul style={styles.list}>
               {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players || {}))
@@ -1499,9 +1381,9 @@ export default function PimPamPofWeb() {
                   const pName = (room.participants?.[id]?.name) || (room.players?.[id]?.name) || "Speler";
                   const active = room.turn === id;
                   const jcount = (room.jail && room.jail[id]) || 0;
-                  const showKick = id !== playerId;
+                  const showKick = id !== (playerId || "");
                   const score = (!room.solo && room.scores && room.scores[id]) || 0;
-                  const hot = room?.jillaLast?.pid === id && jillaAnnounceActive;
+                  const hot = room?.jillaLast?.pid === id && (Date.now() - (room?.jillaLast?.at || 0) < 2000);
                   const onlineNow = hasPresence(room, id);
 
                   return (
@@ -1529,18 +1411,20 @@ export default function PimPamPofWeb() {
         )}
 
         <footer style={styles.foot}>
-          {Boolean(roomCode)
+          {isOnlineRoom
             ? (room?.solo ? "Solo modus (geen timer/punten)." : "Multiplayer: timer & punten actief (5s cooldown).")
             : (offlineSolo ? "Offline solo actief." : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline)."))}
         </footer>
       </div>
 
-      {/* Toasters */}
+      {/* Dubble Pof toast */}
       {pofShow && (
         <div className="pof-toast">
           <div className="pof-bubble">{pofText}</div>
         </div>
       )}
+
+      {/* Score toast */}
       {scoreToast.show && (
         <div className="score-toast">
           <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
@@ -1549,7 +1433,7 @@ export default function PimPamPofWeb() {
         </div>
       )}
 
-      {/* Leaderboard overlay */}
+      {/* Leaderboard-overlay */}
       {leaderOpen && leaderData && (
         <div className="overlay" onClick={() => setLeaderOpen(false)}>
           <div className="card" onClick={e => e.stopPropagation()}>
@@ -1590,4 +1474,3 @@ export default function PimPamPofWeb() {
     </>
   );
 }
-
