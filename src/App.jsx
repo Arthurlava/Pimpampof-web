@@ -504,6 +504,7 @@ export default function PimPamPofWeb() {
     }
 
     // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
+    // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
     async function finishGameAndRecord() {
         if (!roomCode || !room) return;
         if (!isHost) { alert("Alleen de host kan het potje afronden."); return; }
@@ -574,8 +575,9 @@ export default function PimPamPofWeb() {
             });
         }
 
-        alert("Potje afgerond en opgeslagen in jouw match history (dit apparaat).");
+        // Geen alert meer hier — stil afronden
     }
+
 
     async function startSpelOnline() {
         if (!navigator.onLine) { alert("Je bent offline — kan niet starten."); return; }
@@ -986,7 +988,10 @@ export default function PimPamPofWeb() {
             }
         }
 
-        if (room && room.started && !room.solo && (room.participants || room.players)) {
+        // Leaderboard tonen bij leave als:
+        // - multiplayer, en
+        // - het potje nog bezig is (started) OF al afgerond is (finished)
+        if (room && !room.solo && (room.started || room.finished) && (room.participants || room.players)) {
             const snap = buildLeaderboardSnapshot(room);
             setLeaderData(snap);
             setLeaderOpen(true);
@@ -994,6 +999,7 @@ export default function PimPamPofWeb() {
 
         await leaveRoom();
     }
+
 
     /* ---------- cooldown -> answer overgang (alleen multiplayer) ---------- */
     useEffect(() => {
