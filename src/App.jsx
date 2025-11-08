@@ -403,7 +403,7 @@ export default function PimPamPofWeb() {
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
         const code = makeRoomCode();
-        const qs = getSeedQuestions(); // ← typo gefixt
+        const qs = getSeedQuestions();
         const order = shuffle([...Array(qs.length).keys()]);
         const playersOrder = [playerId];
         const obj = {
@@ -430,6 +430,7 @@ export default function PimPamPofWeb() {
             turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
             startedAt: null,
+            startOrder: null,     // ← NIEUW: wordt gezet bij start
             version: 5
         };
         await set(ref(db, `rooms/${code}`), obj);
@@ -438,7 +439,17 @@ export default function PimPamPofWeb() {
         attachRoomListener(code);
 
         if (autoStart) {
-            await update(ref(db, `rooms/${code}`), { started: true, startedAt: Date.now() });
+            // bij autostart meteen startOrder vastleggen
+            const snap = await get(ref(db, `rooms/${code}`));
+            const data = snap.val() || {};
+            const initialOrder = Array.isArray(data.playersOrder)
+                ? data.playersOrder.filter(id => data.players && data.players[id])
+                : Object.keys(data.players || {});
+            await update(ref(db, `rooms/${code}`), {
+                started: true,
+                startedAt: Date.now(),
+                startOrder: initialOrder
+            });
             setTimeout(() => letterRef.current?.focus(), 0);
         }
     }
@@ -571,6 +582,12 @@ export default function PimPamPofWeb() {
         if (!room || !isHost) { return; }
         const nextStartLetter = (!room.lastLetter || room.lastLetter === "?") ? randomStartConsonant() : room.lastLetter;
 
+        // Bepaal startOrder 1 keer bij start
+        const initialOrder = Array.isArray(room.playersOrder)
+            ? room.playersOrder.filter(id => room.players && room.players[id])
+            : Object.keys(room.players || {});
+        const safeStartOrder = initialOrder.length > 0 ? initialOrder : (room.hostId ? [room.hostId] : []);
+
         await update(ref(db, `rooms/${roomCode}`), {
             started: true,
             finished: false,
@@ -580,7 +597,8 @@ export default function PimPamPofWeb() {
             phase: "answer",
             turnStartAt: room.solo ? null : Date.now(),
             cooldownEndAt: null,
-            startedAt: Date.now()
+            startedAt: Date.now(),
+            startOrder: safeStartOrder   // ← NIEUW: vastgezet voor ronde-berekening
         });
         setTimeout(() => letterRef.current?.focus(), 0);
     }
@@ -1037,7 +1055,20 @@ export default function PimPamPofWeb() {
     const potentialPoints = !room?.solo ? calcPoints(answerElapsedMs) : 0;
 
     // NIEUW: ronde (alleen actuele index) + duur
-    const currentRound = isOnlineRoom ? ((room?.currentIndex ?? 0) + 1) : (offlineSolo ? ((offIndex >= 0 ? offIndex : 0) + 1) : 0);
+    // --- Ronde (op basis van rotaties)
+    // Gebruik startOrder (vastgezet bij start). Valt terug op huidige players (min 1) als startOrder ontbreekt.
+    const roundSize = (isOnlineRoom && room?.started)
+        ? Math.max(1, Array.isArray(room?.startOrder) && room.startOrder.length > 0
+            ? room.startOrder.length
+            : Object.keys(room?.players || {}).length || 1)
+        : 1;
+
+    // currentIndex telt elke beurt (answer of jilla-skip). Ronde = 1 + floor(currentIndex / roundSize).
+    const currentRound = isOnlineRoom
+        ? (1 + Math.floor((room?.currentIndex ?? 0) / roundSize))
+        : (offlineSolo ? (1 + Math.floor(Math.max(0, offIndex) / 1)) : 0);
+
+    // Duur zoals eerder
     const matchStartedAt = isOnlineRoom ? (room?.startedAt || room?.createdAt || null) : (offlineSolo ? offStartedAt : null);
     const matchDurationMs = matchStartedAt ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now())) : 0;
 
