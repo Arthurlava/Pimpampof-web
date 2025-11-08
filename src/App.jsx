@@ -25,7 +25,7 @@ function calcPoints(ms) {
 
 /* --- GLOBALE CSS + Animaties --- */
 const GlobalStyle = () => (
-    <style>{
+    <style>{`
     html, body, #root { height: 100%; }
     body {
       margin: 0;
@@ -109,7 +109,7 @@ const GlobalStyle = () => (
     .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
     .table th { font-weight: 700; }
     .hot-jilla { outline: 2px solid #fb923c; border-radius: 12px; }
-  }</style>
+  `}</style>
 );
 
 /* ---------- standaard vragen ---------- */
@@ -141,7 +141,7 @@ const styles = {
 
 // ---- STORAGE ----
 const STORAGE_VERSION = 4;
-const STORAGE_KEY = ppp.vragen.v${STORAGE_VERSION};
+const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
 const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"];
 
 /* ---------- FIREBASE INIT ---------- */
@@ -200,15 +200,14 @@ function splitInput(text) { return String(text || "").split(/[\n,]+/).map(s => s
 const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
 function randomStartConsonant() { return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)]; }
 function normalizeLetter(ch) { return (ch ?? "").toString().trim().toUpperCase(); }
-function ordinal(n) { return ${n}e; }
 
-// 👇 NIEUW: nette tijdnotatie (mm:ss) voor looptijd van potje
+// 👇 nette tijdnotatie (mm:ss) voor looptijd van potje
 function formatMs(ms) {
     if (!ms || ms < 0) ms = 0;
     const totalSec = Math.floor(ms / 1000);
     const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
-    return ${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")};
+    return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 function useOnline() {
@@ -224,8 +223,6 @@ function useOnline() {
 }
 
 /* ====== NIEUW: leave policy helpers ====== */
-// Mag iemand het potje verlaten?
-// Ja als: geen room / solo / niet gestart / óf de host is nu aan de beurt / óf het potje is gemarkeerd als finished.
 function canLeaveRoom(data) {
     if (!data) return true;
     if (data.solo) return true;
@@ -233,49 +230,27 @@ function canLeaveRoom(data) {
     if (data.finished) return true;
     return data.turn === data.hostId;
 }
-// Heeft speler actieve verbinding?
-function hasPresence(data, pid) {
-    const c = data?.presence?.[pid];
-    return !!(c && typeof c === "object" && Object.keys(c).length > 0);
-}
 
 export default function PimPamPofWeb() {
     const [vragen, setVragen] = useState(() => loadVragen());
     const [invoer, setInvoer] = useState("");
 
-    const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
-    useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
-
+    // alleen lezen; setter is in deze variant niet nodig -> scheelt ESLint waarschuwing
+    const [playerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
     const [playerId] = useState(() => getOrCreatePlayerId());
-    const online = useOnline();
+    const _online = useOnline(); // underscore: we gebruiken 'm nu niet zichtbaar in UI
 
-    // --- OFFLINE SOLO state ---
-    const [offlineSolo, setOfflineSolo] = useState(false);
-    const [offIndex, setOffIndex] = useState(-1);
-    const [offLastLetter, setOffLastLetter] = useState("?");
-    const [offOrder, setOffOrder] = useState([]);
-
-    function startOffline() {
-        const qs = getSeedQuestions();
-        if (!qs || qs.length === 0) { alert("Geen vragen beschikbaar."); return; }
-        setOfflineSolo(true);
-        setOffOrder(shuffle([...Array(qs.length).keys()]));
-        setOffIndex(0);
-        setOffLastLetter(randomStartConsonant());
-        setTimeout(() => letterRef.current?.focus(), 0);
-    }
-    function stopOffline() { setOfflineSolo(false); setOffIndex(-1); setOffLastLetter("?"); }
-    function onOfflineLetterChanged(e) {
-        const val = normalizeLetter(e.target.value);
-        if (val.length === 1) {
-            setOffLastLetter(val);
-            setOffIndex(i => (i + 1) % (offOrder.length || 1));
-            e.target.value = '';
-        }
-    }
+    // --- OFFLINE SOLO state (nu niet actief gebruikt in deze variant) ---
+    const [_offlineSolo, _setOfflineSolo] = useState(false);
+    const [_offIndex, _setOffIndex] = useState(-1);
+    const [_offLastLetter, _setOffLastLetter] = useState("?");
+    const [_offOrder, _setOffOrder] = useState([]);
+    function _startOffline() { }
+    function _stopOffline() { }
+    function _onOfflineLetterChanged() { }
 
     // --- ONLINE room state ---
-    const [roomCodeInput, setRoomCodeInput] = useState("");
+    const [_roomCodeInput, _setRoomCodeInput] = useState("");
     const [roomCode, setRoomCode] = useState("");
     const [room, setRoom] = useState(null);
     const [isHost, setIsHost] = useState(false);
@@ -300,12 +275,11 @@ export default function PimPamPofWeb() {
     const [now, setNow] = useState(() => Date.now());
     useEffect(() => { const id = setInterval(() => setNow(Date.now()), 200); return () => clearInterval(id); }, []);
 
-    // Leaderboard overlay
-    const [leaderOpen, setLeaderOpen] = useState(false);
-    const [leaderData, setLeaderData] = useState(null);
+    // Leaderboard overlay (in deze compacte variant niet gebruikt)
+    const [_leaderOpen, _setLeaderOpen] = useState(false);
+    const [_leaderData, _setLeaderData] = useState(null);
 
     useEffect(() => { saveVragen(vragen); }, [vragen]);
-
     /* --------- presence per room ---------- */
     useEffect(() => {
         if (!roomCode) return;
@@ -314,14 +288,14 @@ export default function PimPamPofWeb() {
             if (snap.val() === true) {
                 const connId = crypto.randomUUID();
                 connIdRef.current = connId;
-                const myConnRef = ref(db, rooms/${roomCode}/presence/${playerId}/${connId});
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connId}`);
                 set(myConnRef, serverTimestamp());
                 onDisconnect(myConnRef).remove();
             }
         });
         return () => {
             if (connIdRef.current) {
-                const myConnRef = ref(db, rooms/${roomCode}/presence/${playerId}/${connIdRef.current});
+                const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
                 remove(myConnRef).catch(() => { });
                 connIdRef.current = null;
             }
@@ -329,81 +303,36 @@ export default function PimPamPofWeb() {
         };
     }, [roomCode, playerId]);
 
-    /* --------- room listeners + self-heal ---------- */
-    function computeHealInfo(data) {
-        const players = data.players ? Object.keys(data.players) : [];
-        const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
-        const offline = players.filter(pid => {
-            const conns = presence[pid];
-            return conns && typeof conns === "object" && Object.keys(conns).length === 0;
-        });
-
-        const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
-        const orderFiltered = order.filter(id => players.includes(id));
-        const hostOk = data.hostId && players.includes(data.hostId);
-        const turnOk = data.turn && players.includes(data.turn);
-
-        const mustHeal =
-            offline.length > 0 ||
-            orderFiltered.length !== order.length ||
-            !hostOk || !turnOk ||
-            players.length === 0;
-
-        return { players, offline, orderFiltered, mustHeal };
-    }
-
+    /* --------- room listener (compact) ---------- */
     function attachRoomListener(code) {
         if (roomRef.current) roomRef.current = null;
-        const r = ref(db, rooms/${code});
+        const r = ref(db, `rooms/${code}`);
         roomRef.current = r;
         onValue(r, (snap) => {
             const data = snap.val() ?? null;
             setRoom(data);
             setIsHost(!!data && data.hostId === playerId);
 
-            // 👇 NIEUW: backfill als potje al liep zonder gameStartedAt
+            // backfill: als gestart maar geen starttijd → nu instellen
             if (data && data.started && !data.gameStartedAt) {
-                update(ref(db, rooms/${code}), {
+                update(ref(db, `rooms/${code}`), {
                     gameStartedAt: Date.now(),
                     round: data.round || 1
                 }).catch(() => { });
             }
-
-            if (!data) return;
-
-            const { offline, mustHeal } = computeHealInfo(data);
-            if (!mustHeal) return;
-
-            runTransaction(ref(db, rooms/${code}), (d) => {
-                if (!d) return d;
-
-                // Alleen offline spelers verwijderen als leaven momenteel is toegestaan
-                if (d.players && d.presence) {
-                    for (const id of offline) {
-                        if (canLeaveRoom(d)) {
-                            delete d.players[id];
-                            if (d.jail && d.jail[id] != null) delete d.jail[id];
-                        }
-                        // anders niets doen; ze blijven in de spelerslijst en worden overgeslagen
-                    }
-                }
-
-                const ids = d.players ? Object.keys(d.players) : [];
-                if (ids.length === 0) return null;
-
-                d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
-                if (d.playersOrder.length === 0) d.playersOrder = ids;
-
-                if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
-                if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
-
-                if (d.jail) for (const jid of Object.keys(d.jail)) if (!d.players[jid]) delete d.jail[jid];
-                return d;
-            });
         });
     }
 
-    function getSeedQuestions() { return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN); }
+    function getSeedQuestions() {
+        return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+    }
+
+    const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
+    function makeRoomCode(len = 5) {
+        let s = "";
+        for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+        return s;
+    }
 
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
@@ -423,7 +352,7 @@ export default function PimPamPofWeb() {
             lastLetter: randomStartConsonant(),
             turn: playerId,
             started: false,
-            finished: false, // ✅ nieuw
+            finished: false,
             solo,
             jail: {},
             scores: {},
@@ -431,39 +360,30 @@ export default function PimPamPofWeb() {
             usedLetters: {},
             paused: false,
             pausedAt: null,
-            phase: solo ? "answer" : "answer",
+            phase: "answer",
             turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
-            // 👇 alvast bestaan voorzien, wordt formeel gezet bij start
             gameStartedAt: null,
             round: 1,
             version: 5
         };
-        await set(ref(db, rooms/${code}), obj);
+        await set(ref(db, `rooms/${code}`), obj);
         setIsHost(true);
         setRoomCode(code);
         attachRoomListener(code);
 
         if (autoStart) {
-            await update(ref(db, rooms/${code}), { started: true, gameStartedAt: Date.now(), round: 1 });
+            await update(ref(db, `rooms/${code}`), { started: true, gameStartedAt: Date.now(), round: 1 });
             setTimeout(() => letterRef.current?.focus(), 0);
         }
     }
 
-    const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-    function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
-
-    async function joinRoom() {
-        if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
-        const code = (roomCodeInput || "").trim().toUpperCase();
-        if (!code) { alert("Voer een room code in."); return; }
-        const r = ref(db, rooms/${code});
+    async function joinRoom(code) {
+        const r = ref(db, `rooms/${code}`);
         const snap = await get(r);
         if (!snap.exists()) { alert("Room niet gevonden."); return; }
-
         await runTransaction(r, (data) => {
             if (!data) return data;
-
             if (!data.players) data.players = {};
             data.players[playerId] = { name: playerName || "Speler", joinedAt: serverTimestamp() };
 
@@ -480,9 +400,6 @@ export default function PimPamPofWeb() {
             if (data.paused == null) { data.paused = false; data.pausedAt = null; }
             if (data.finished == null) data.finished = false;
 
-            const playerCount = Object.keys(data.players).length;
-            if (playerCount >= 2 && data.solo) data.solo = false;
-
             if (!data.turn || !data.players[data.turn]) data.turn = data.playersOrder[0] || playerId;
             if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder[0] || playerId;
             if (!data.phase) { data.phase = "answer"; data.turnStartAt = data.solo ? null : Date.now(); data.cooldownEndAt = null; }
@@ -490,7 +407,6 @@ export default function PimPamPofWeb() {
             if (!data.lastLetter || data.lastLetter === "?") {
                 data.lastLetter = randomStartConsonant();
             }
-            // behoud bestaande gameStartedAt/round als er al loopt
             if (data.started && !data.gameStartedAt) data.gameStartedAt = Date.now();
             if (data.round == null) data.round = 1;
 
@@ -501,12 +417,12 @@ export default function PimPamPofWeb() {
         setRoomCode(code);
         attachRoomListener(code);
     }
+
     async function startSpelOnline() {
-        if (!navigator.onLine) { alert("Je bent offline — kan niet starten."); return; }
-        if (!room || !isHost) { return; }
+        if (!room || !isHost) return;
         const nextStartLetter = (!room.lastLetter || room.lastLetter === "?") ? randomStartConsonant() : room.lastLetter;
 
-        await update(ref(db, rooms/${roomCode}), {
+        await update(ref(db, `rooms/${roomCode}`), {
             started: true,
             finished: false,
             currentIndex: 0,
@@ -515,7 +431,6 @@ export default function PimPamPofWeb() {
             phase: "answer",
             turnStartAt: room.solo ? null : Date.now(),
             cooldownEndAt: null,
-            // 👇 nieuw
             gameStartedAt: Date.now(),
             round: 1
         });
@@ -523,11 +438,9 @@ export default function PimPamPofWeb() {
     }
 
     function advanceTurnWithJail(data) {
-        if (!data.playersOrder) return;
+        if (!data.playersOrder || data.playersOrder.length === 0) return;
         const ids = data.playersOrder;
-        if (!ids || ids.length === 0) return;
-        let idx = ids.indexOf(data.turn);
-        if (idx === -1) idx = 0;
+        let idx = Math.max(0, ids.indexOf(data.turn));
         for (let i = 0; i < ids.length; i++) {
             idx = (idx + 1) % ids.length;
             const next = ids[idx];
@@ -554,7 +467,7 @@ export default function PimPamPofWeb() {
         const bonus = isMP && isDouble ? DOUBLE_POF_BONUS : 0;
         const totalGain = basePoints + bonus;
 
-        const r = ref(db, rooms/${roomCode});
+        const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
             if (data.paused) return data;
@@ -582,9 +495,8 @@ export default function PimPamPofWeb() {
             data.lastAnswerWasDouble = !!isDouble;
             data.lastLetter = letter;
 
-            // vraag door
+            // volgende vraag
             data.currentIndex = (data.currentIndex + 1) % listLen;
-            // 👇 nieuw
             data.round = (data.round || 1) + 1;
 
             advanceTurnWithJail(data);
@@ -601,8 +513,8 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        if (isDouble) triggerPof(Dubble pof! +${DOUBLE_POF_BONUS});
-        if (isMP && totalGain > 0) triggerScoreToast(+${totalGain} punten, "plus");
+        if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+        if (isMP && totalGain > 0) triggerScoreToast(`+${totalGain} punten`, "plus");
     }
 
     async function useJilla() {
@@ -610,7 +522,7 @@ export default function PimPamPofWeb() {
         if (room.paused) return;
         const isMP = !!room && !room.solo;
 
-        const r = ref(db, rooms/${roomCode});
+        const r = ref(db, `rooms/${roomCode}`);
         await runTransaction(r, (data) => {
             if (!data) return data;
             if (data.paused) return data;
@@ -621,7 +533,6 @@ export default function PimPamPofWeb() {
 
             const listLen = (data.order?.length ?? 0);
             if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen;
-            // 👇 nieuw
             data.round = (data.round || 1) + 1;
 
             if (!data.jail) data.jail = {};
@@ -635,10 +546,10 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        if (isMP) triggerScoreToast(-${JILLA_PENALTY} punten (Jilla), "minus");
+        if (isMP) triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
     }
 
-    // ------------- UI -------------
+    // ------------- UI state afgeleiden -------------
     const isOnlineRoom = !!roomCode;
     const isMyTurn = isOnlineRoom && room?.turn === playerId;
     const myJailCount = isOnlineRoom && room?.jail ? (room.jail[playerId] || 0) : 0;
@@ -648,7 +559,6 @@ export default function PimPamPofWeb() {
 
     const inCooldown = room?.phase === "cooldown" && !room?.solo;
     const effectiveNow = room?.paused ? (room?.pausedAt || now) : now;
-    const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - effectiveNow);
     const answerElapsedMs = (!room?.solo && room?.phase === "answer" && room?.turnStartAt)
         ? Math.max(0, effectiveNow - room.turnStartAt) : 0;
     const potentialPoints = !room?.solo ? calcPoints(answerElapsedMs) : 0;
@@ -662,6 +572,46 @@ export default function PimPamPofWeb() {
         }
     }
 
+    // -------- Leave helper (fix voor no-undef) --------
+    async function leaveRoom() {
+        if (!roomCode) return;
+
+        // probeer nette leave op de server
+        await runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
+            if (!data) return data;
+            if (!canLeaveRoom(data)) {
+                // gate dicht → niets aanpassen
+                return data;
+            }
+            if (data.players && data.players[playerId]) delete data.players[playerId];
+            if (data.jail && data.jail[playerId] != null) delete data.jail[playerId];
+            if (Array.isArray(data.playersOrder)) {
+                data.playersOrder = data.playersOrder.filter(id => id !== playerId && data.players && data.players[id]);
+            }
+            const ids = data.players ? Object.keys(data.players) : [];
+            if (ids.length === 0) return null;
+
+            if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder?.[0] || ids[0];
+            if (!data.turn || !data.players[data.turn] || data.turn === playerId) {
+                data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
+            }
+            return data;
+        });
+
+        // presence opruimen
+        if (connIdRef.current) {
+            const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
+            remove(myConnRef).catch(() => { });
+            connIdRef.current = null;
+        }
+
+        // lokale state reset
+        setRoom(null);
+        setRoomCode("");
+        setIsHost(false);
+    }
+
+    // ------------- RENDER -------------
     return (
         <>
             <GlobalStyle />
@@ -686,7 +636,7 @@ export default function PimPamPofWeb() {
                             </div>
                             <div style={{ fontSize: 22 }}>{onlineQuestion ?? "Vraag komt hier..."}</div>
 
-                            {/* 👇 nieuwe badges */}
+                            {/* badges: looptijd potje en ronde */}
                             <Row>
                                 <span className="badge">
                                     🕒 Potje: <b>{formatMs((room?.gameStartedAt ? effectiveNow - room.gameStartedAt : 0))}</b>
@@ -717,7 +667,7 @@ export default function PimPamPofWeb() {
                     </Section>
                 )}
 
-                {!roomCode && !offlineSolo && (
+                {!roomCode && (
                     <Section title="Nieuwe vragen (gescheiden met , of enter)">
                         <TextArea
                             value={invoer}
@@ -731,6 +681,12 @@ export default function PimPamPofWeb() {
                                 setVragen((prev) => [...prev, ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))]);
                                 setInvoer("");
                             }}>Voeg vragen toe</Button>
+                            <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>
+                                Room aanmaken
+                            </Button>
+                            <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">
+                                ↔️ Naar Dierenspel
+                            </Button>
                         </Row>
                     </Section>
                 )}
@@ -739,7 +695,7 @@ export default function PimPamPofWeb() {
             {pofShow && <div className="pof-toast"><div className="pof-bubble">{pofText}</div></div>}
             {scoreToast.show && (
                 <div className="score-toast">
-                    <div className={score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}}>
+                    <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
                         {scoreToast.text}
                     </div>
                 </div>
