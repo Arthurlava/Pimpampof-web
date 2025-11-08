@@ -173,8 +173,8 @@ function loadVragen() {
         return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
     } catch { return writeSeeded(); }
 }
-// ESLint no-empty fix: catch contains a no-op statement
-function saveVragen(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch { /* ignore write errors (e.g., private mode) */ void 0; } }
+// ESLint no-empty fix: catch bevat een no-op
+function saveVragen(v) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(v)); } catch { /* ignore write errors (bv. private mode) */ void 0; } }
 
 /* ---------- persistente speler-id + naam ---------- */
 const PID_KEY = "ppp.playerId";
@@ -256,7 +256,7 @@ export default function PimPamPofWeb() {
     const [offIndex, setOffIndex] = useState(-1);
     const [offLastLetter, setOffLastLetter] = useState("?");
     const [offOrder, setOffOrder] = useState([]);
-    // NIEUW: duur van solo-potje
+    // Solo-duur
     const [offStartedAt, setOffStartedAt] = useState(null);
 
     function startOffline() {
@@ -403,7 +403,7 @@ export default function PimPamPofWeb() {
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
         const code = makeRoomCode();
-        const qs = getSeedQuestions();
+        the const qs = getSeedQuestions();
         const order = shuffle([...Array(qs.length).keys()]);
         const playersOrder = [playerId];
         const obj = {
@@ -429,7 +429,6 @@ export default function PimPamPofWeb() {
             phase: solo ? "answer" : "answer",
             turnStartAt: solo ? null : Date.now(),
             cooldownEndAt: null,
-            // NIEUW: we houden startmoment van het potje bij zodra gestart
             startedAt: null,
             version: 5
         };
@@ -580,7 +579,6 @@ export default function PimPamPofWeb() {
             phase: "answer",
             turnStartAt: room.solo ? null : Date.now(),
             cooldownEndAt: null,
-            // NIEUW: zet startmoment potje
             startedAt: Date.now()
         });
         setTimeout(() => letterRef.current?.focus(), 0);
@@ -642,7 +640,7 @@ export default function PimPamPofWeb() {
                 if (p.statDelta) {
                     s.totalTimeMs = Math.max(0, s.totalTimeMs - (p.statDelta.timeMs || 0));
                     s.answeredCount = Math.max(0, s.answeredCount - (p.statDelta.answered || 0));
-                    if (p.statDelta.double) s.doubleCount = Math.max(0, s.doubleCount - p.statDelta.double);
+                    if (p.statDelta.double) s.doubleCount = Math.max(0, (s.doubleCount || 0) - p.statDelta.double);
                 }
                 d.stats[act.by] = s;
             }
@@ -996,7 +994,7 @@ export default function PimPamPofWeb() {
         }
     }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
-    /* ---------- NIEUW: watchdog om offline beurt direct te skippen ---------- */
+    /* ---------- watchdog: skip offline beurt ---------- */
     useEffect(() => {
         if (!roomCode || !room) return;
         if (room.solo || room.paused) return;
@@ -1037,10 +1035,8 @@ export default function PimPamPofWeb() {
         ? Math.max(0, effectiveNow - room.turnStartAt) : 0;
     const potentialPoints = !room?.solo ? calcPoints(answerElapsedMs) : 0;
 
-    // NIEUW: ronde + duur
-    const totalRounds = isOnlineRoom && room?.order ? room.order.length : (offlineSolo ? (offOrder?.length || 0) : 0);
+    // NIEUW: ronde (alleen actuele index) + duur
     const currentRound = isOnlineRoom ? ((room?.currentIndex ?? 0) + 1) : (offlineSolo ? ((offIndex >= 0 ? offIndex : 0) + 1) : 0);
-
     const matchStartedAt = isOnlineRoom ? (room?.startedAt || room?.createdAt || null) : (offlineSolo ? offStartedAt : null);
     const matchDurationMs = matchStartedAt ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now())) : 0;
 
@@ -1090,7 +1086,7 @@ export default function PimPamPofWeb() {
         return now - at < 2000;
     })();
 
-    /* ===== NIEUW: Profiel (match history + highscore) ===== */
+    /* ===== Profiel (match history + highscore) ===== */
     const [profileOpen, setProfileOpen] = useState(false);
     const [profile, setProfile] = useState(null);
     useEffect(() => {
@@ -1265,10 +1261,10 @@ export default function PimPamPofWeb() {
                         {!online && !offlineSolo && <span className="muted">start Solo</span>}
                     </Row>
 
-                    {/* Mini-HUD in de header als er daadwerkelijk gespeeld wordt */}
+                    {/* Mini-HUD ALLEEN in de header */}
                     {(offlineSolo || (isOnlineRoom && room?.started)) && (
                         <div className="mini-hud" style={{ marginTop: 6 }}>
-                            <span className="badge">🧭 Ronde <b>{currentRound}</b> / {totalRounds || "—"}</span>
+                            <span className="badge">🧭 Ronde: <b>{currentRound}</b></span>
                             <span className="badge">⏳ Duur <b>{fmtDuration(matchDurationMs)}</b></span>
                         </div>
                     )}
@@ -1313,11 +1309,6 @@ export default function PimPamPofWeb() {
                 {offlineSolo && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                            <div className="mini-hud">
-                                <span className="badge">🧭 Ronde <b>{currentRound}</b> / {totalRounds || "—"}</span>
-                                <span className="badge">⏳ Duur <b>{fmtDuration(matchDurationMs)}</b></span>
-                            </div>
-
                             <div className="badge">Solo</div>
 
                             <div style={{ fontSize: 18 }}>
@@ -1347,11 +1338,6 @@ export default function PimPamPofWeb() {
                 {isOnlineRoom && room?.started && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-                            <div className="mini-hud">
-                                <span className="badge">🧭 Ronde <b>{currentRound}</b> / {totalRounds || "—"}</span>
-                                <span className="badge">⏳ Duur <b>{fmtDuration(matchDurationMs)}</b></span>
-                            </div>
-
                             <div className="badge">Room: <b>{roomCode}</b>
                                 <button onClick={copyRoomCode} style={{ ...styles.btn, padding: "4px 10px", marginLeft: 8 }}>Kopieer</button>
                             </div>
@@ -1520,6 +1506,7 @@ export default function PimPamPofWeb() {
                 </div>
             )}
 
+            {/* Profiel-overlay */}
             {renderProfileOverlay()}
         </>
     );
