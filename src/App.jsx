@@ -505,6 +505,7 @@ export default function PimPamPofWeb() {
 
     // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
     // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
+    // Host rondt het potje af en schrijft history + lokale highscore (dit apparaat)
     async function finishGameAndRecord() {
         if (!roomCode || !room) return;
         if (!isHost) { alert("Alleen de host kan het potje afronden."); return; }
@@ -531,7 +532,9 @@ export default function PimPamPofWeb() {
             const answered = st.answeredCount || 0;
             const avgMs = answered > 0 ? (st.totalTimeMs / answered) : null;
             const adjusted = (score + PRIOR_MEAN * PRIOR_WEIGHT) / ((answered || 0) + PRIOR_WEIGHT);
-            results.push({ pid, name, score, answered, avgMs, adjusted });
+            const jilla = st.jillaCount || 0;
+            const dpf = st.doubleCount || 0;
+            results.push({ pid, name, score, answered, avgMs, adjusted, jilla, dpf });
         }
         results.sort((a, b) => (b.adjusted - a.adjusted) || (b.score - a.score));
 
@@ -545,8 +548,14 @@ export default function PimPamPofWeb() {
                 return ix >= 0 ? (ix + 1) : null;
             })(),
             players: results.map(r => ({
-                pid: r.pid, name: r.name, score: r.score, answered: r.answered,
-                avgMs: r.avgMs, adjusted: Number(r.adjusted.toFixed(2))
+                pid: r.pid,
+                name: r.name,
+                score: r.score,
+                answered: r.answered,
+                avgMs: r.avgMs,
+                adjusted: Number(r.adjusted.toFixed(2)),
+                jilla: r.jilla,
+                dpf: r.dpf
             }))
         };
 
@@ -575,8 +584,9 @@ export default function PimPamPofWeb() {
             });
         }
 
-        // Geen alert meer hier — stil afronden
+        // Geen alert meer — stil afronden
     }
+
 
 
     async function startSpelOnline() {
@@ -1133,12 +1143,14 @@ export default function PimPamPofWeb() {
         return () => off();
     }, [playerId]);
 
-    function fmt(ts) { try { return new Date(ts).toLocaleString(); } catch { return "—"; } }
     function renderProfileOverlay() {
         if (!profileOpen) return null;
         const matches = profile?.matches ? Object.values(profile.matches) : [];
         matches.sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
         const hs = profile?.localHighscore || null;
+
+        const fmt = (ts) => { try { return new Date(ts).toLocaleString(); } catch { return "—"; } };
+        const ordinal = (n) => `${n}e`;
 
         return (
             <div className="overlay" onClick={() => setProfileOpen(false)}>
@@ -1153,7 +1165,6 @@ export default function PimPamPofWeb() {
                                 <span><b>Raw:</b> {hs.bestRaw}</span>
                                 {hs.bestGame && (
                                     <>
-                                        <span><b>Room:</b> {hs.bestGame.roomCode}</span>
                                         <span><b>Datum:</b> {fmt(hs.bestGame.endedAt)}</span>
                                         {hs.bestGame.placement && <span><b>Resultaat:</b> {hs.bestGame.placement === 1 ? "Gewonnen" : `${hs.bestGame.placement}e`}</span>}
                                     </>
@@ -1168,34 +1179,44 @@ export default function PimPamPofWeb() {
                     {matches.length === 0 ? (
                         <div className="muted">Nog geen gespeelde potjes opgeslagen.</div>
                     ) : (
-                        <table className="table">
-                            <thead>
-                                <tr>
-                                    <th>Datum</th>
-                                    <th>Room</th>
-                                    <th>Resultaat</th>
-                                    <th>Score</th>
-                                    <th>Adjusted</th>
-                                    <th>Deelnemers</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {matches.map(m => {
-                                    const you = m.you || { score: 0, answered: 0, adjusted: 0 };
-                                    const result = m.placement === 1 ? "Gewonnen" : (m.placement ? `${m.placement}e` : "—");
-                                    return (
-                                        <tr key={`${m.roomCode}-${m.endedAt}`}>
-                                            <td>{fmt(m.endedAt)}</td>
-                                            <td>{m.roomCode}</td>
-                                            <td>{result}</td>
-                                            <td>{you.score} / {you.answered}</td>
-                                            <td>{Number(you.adjusted || 0).toFixed(2)}</td>
-                                            <td>{Array.isArray(m.players) ? m.players.map(p => p.name).join(", ") : "—"}</td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
+                        // Scrollbare container
+                        <div style={{ maxHeight: "60vh", overflow: "auto", borderRadius: 12 }}>
+                            <table className="table">
+                                <thead>
+                                    <tr>
+                                        <th>Datum</th>
+                                        <th>Resultaat</th>
+                                        <th>Punten</th>
+                                        <th>Gem. tijd / vraag</th>
+                                        <th>Jilla</th>
+                                        <th>Dubble pof</th>
+                                        <th>Deelnemers</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {matches.map(m => {
+                                        // 'you' bevat mogelijk nieuwe velden jilla/dpf; val terug op 0 voor oudere matches
+                                        const you = m.you || { score: 0, answered: 0, adjusted: 0, avgMs: null, jilla: 0, dpf: 0 };
+                                        const placement = m.placement;
+                                        const result = placement === 1 ? "Gewonnen" : (placement ? ordinal(placement) : "—");
+                                        const avgSecs = you.avgMs == null ? "—" : `${(you.avgMs / 1000).toFixed(1)}s`;
+                                        const names = Array.isArray(m.players) ? m.players.map(p => p.name).join(", ") : "—";
+
+                                        return (
+                                            <tr key={`${m.roomCode || "room"}-${m.endedAt || Math.random()}`}>
+                                                <td>{fmt(m.endedAt)}</td>
+                                                <td>{result}</td>
+                                                <td>{you.score}{you.answered ? ` / ${you.answered}` : ""}</td>
+                                                <td>{avgSecs}</td>
+                                                <td>{you.jilla ?? 0}</td>
+                                                <td>{you.dpf ?? 0}</td>
+                                                <td>{names}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
 
                     <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
@@ -1205,6 +1226,7 @@ export default function PimPamPofWeb() {
             </div>
         );
     }
+
     return (
         <>
             <GlobalStyle />
