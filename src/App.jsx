@@ -403,7 +403,7 @@ export default function PimPamPofWeb() {
     async function createRoom({ autoStart = false, solo = false } = {}) {
         if (!navigator.onLine && !solo) { alert("Je bent offline — multiplayer kan niet."); return; }
         const code = makeRoomCode();
-        the const qs = getSeedQuestions();
+        const qs = getSeedQuestions(); // ← typo gefixt
         const order = shuffle([...Array(qs.length).keys()]);
         const playersOrder = [playerId];
         const obj = {
@@ -442,6 +442,7 @@ export default function PimPamPofWeb() {
             setTimeout(() => letterRef.current?.focus(), 0);
         }
     }
+
 
     const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]; return s; }
