@@ -453,12 +453,18 @@ export default function PimPamPofWeb() {
     }
 
 async function loadAvailableRooms() {
+    // Wacht tot Firebase anon-auth klaar is (regels kunnen auth vereisen)
+    if (!authReady || !playerId) {
+        console.log("[RoomBrowser] Auth nog niet klaar, geen rooms geladen.");
+        return;
+    }
+
     setRoomListLoading(true);
     try {
         const snap = await get(ref(db, "rooms"));
 
         if (!snap.exists()) {
-            console.log("[RoomBrowser] Geen 'rooms' node gevonden.");
+            console.log("[RoomBrowser] Geen rooms node gevonden.");
             setAvailableRooms([]);
             return;
         }
@@ -471,24 +477,6 @@ async function loadAvailableRooms() {
                 if (!data) return null;
 
                 const players = data.players || {};
-                const presence = data.presence || {};
-
-                // Bepaal online spelers puur op basis van presence
-                const onlineIds = Object.entries(presence)
-                    .filter(([, conns]) =>
-                        conns &&
-                        typeof conns === "object" &&
-                        Object.keys(conns).length > 0
-                    )
-                    .map(([pid]) => pid);
-
-                const onlineNames = onlineIds.map(
-                    (pid) =>
-                        data.participants?.[pid]?.name ||
-                        data.players?.[pid]?.name ||
-                        "Speler"
-                );
-
                 const playerCount = Object.keys(players).length;
 
                 return {
@@ -496,8 +484,7 @@ async function loadAvailableRooms() {
                     started: !!data.started,
                     finished: !!data.finished,
                     playerCount,
-                    onlineCount: onlineIds.length,
-                    onlineNames,
+                    // host-naam uit participants of players
                     hostName:
                         data.participants?.[data.hostId]?.name ||
                         data.players?.[data.hostId]?.name ||
@@ -505,14 +492,13 @@ async function loadAvailableRooms() {
                 };
             })
             .filter(Boolean)
-            // Toon alle niet-afgeronde rooms met minimaal 1 speler
+            // Toon alle rooms die nog niet finished zijn en minimaal 1 speler hebben
             .filter((r) => !r.finished && r.playerCount > 0)
-            // sorteer: eerst meeste online, dan begonnen potjes bovenaan
-            .sort(
-                (a, b) =>
-                    b.onlineCount - a.onlineCount ||
-                    (a.started === b.started ? 0 : a.started ? -1 : 1)
-            );
+            // Begonnen potjes eerst, daarna lobbies
+            .sort((a, b) => {
+                if (a.started === b.started) return 0;
+                return a.started ? -1 : 1;
+            });
 
         console.log("[RoomBrowser] parsed list:", list);
         setAvailableRooms(list);
@@ -524,13 +510,21 @@ async function loadAvailableRooms() {
     }
 }
 
-
-
-    function openRoomBrowser() {
-        if (!navigator.onLine) { alert("Je bent offline — kan geen rooms ophalen."); return; }
-        setRoomBrowserOpen(true);
-        loadAvailableRooms();
+function openRoomBrowser() {
+    if (!navigator.onLine) {
+        alert("Je bent offline — kan geen rooms ophalen.");
+        return;
     }
+
+    if (!authReady || !playerId) {
+        alert("Nog verbinding maken met Firebase… probeer het over een paar seconden opnieuw.");
+        return;
+    }
+
+    setRoomBrowserOpen(true);
+    loadAvailableRooms();
+}
+
 
     async function finishGameAndRecord() {
         if (!roomCode || !room) return;
