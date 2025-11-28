@@ -935,7 +935,7 @@ export default function PimPamPofWeb() {
 
         if (connIdRef.current) {
             const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
-            remove(myConnRef).catch(() => { });
+            remove(myConnRef).catch((err) => console.warn("Kon presence niet verwijderen na leaven", err));
             connIdRef.current = null;
         }
 
