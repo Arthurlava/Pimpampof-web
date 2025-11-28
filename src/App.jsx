@@ -452,16 +452,19 @@ export default function PimPamPofWeb() {
         attachRoomListener(code);
     }
 
- async function loadAvailableRooms() {
+async function loadAvailableRooms() {
     setRoomListLoading(true);
     try {
         const snap = await get(ref(db, "rooms"));
+
         if (!snap.exists()) {
+            console.log("[RoomBrowser] Geen 'rooms' node gevonden.");
             setAvailableRooms([]);
             return;
         }
 
         const raw = snap.val() || {};
+        console.log("[RoomBrowser] raw rooms:", raw);
 
         const list = Object.entries(raw)
             .map(([code, data]) => {
@@ -470,8 +473,15 @@ export default function PimPamPofWeb() {
                 const players = data.players || {};
                 const presence = data.presence || {};
 
-                // Bepaal welke spelers "online" zijn volgens presence
-                const onlineIds = Object.keys(presence).filter((pid) => hasPresence(data, pid));
+                // Bepaal online spelers puur op basis van presence
+                const onlineIds = Object.entries(presence)
+                    .filter(([, conns]) =>
+                        conns &&
+                        typeof conns === "object" &&
+                        Object.keys(conns).length > 0
+                    )
+                    .map(([pid]) => pid);
+
                 const onlineNames = onlineIds.map(
                     (pid) =>
                         data.participants?.[pid]?.name ||
@@ -495,17 +505,16 @@ export default function PimPamPofWeb() {
                 };
             })
             .filter(Boolean)
-            // 🔴 HIER WAS HET PROBLEEM:
-            // eerst: .filter((r) => !r.finished && r.onlineCount > 0)
-            // nu: toon alle potjes met spelers die niet "finished" zijn
+            // Toon alle niet-afgeronde rooms met minimaal 1 speler
             .filter((r) => !r.finished && r.playerCount > 0)
-            // sorteer: eerst meeste online spelers, dan status (bezig / lobby)
+            // sorteer: eerst meeste online, dan begonnen potjes bovenaan
             .sort(
                 (a, b) =>
                     b.onlineCount - a.onlineCount ||
                     (a.started === b.started ? 0 : a.started ? -1 : 1)
             );
 
+        console.log("[RoomBrowser] parsed list:", list);
         setAvailableRooms(list);
     } catch (err) {
         console.error("Kon rooms niet laden:", err);
@@ -514,6 +523,7 @@ export default function PimPamPofWeb() {
         setRoomListLoading(false);
     }
 }
+
 
 
     function openRoomBrowser() {
