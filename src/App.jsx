@@ -452,32 +452,69 @@ export default function PimPamPofWeb() {
         attachRoomListener(code);
     }
 
-    async function loadAvailableRooms() {
-        setRoomListLoading(true);
-        try {
-            const snap = await get(ref(db, "rooms"));
-            if (!snap.exists()) { setAvailableRooms([]); return; }
-            const raw = snap.val() || {};
-            const list = Object.entries(raw).map(([code, data]) => {
-                const onlineIds = Object.keys(data?.presence || {}).filter((pid) => hasPresence(data, pid));
-                const onlineNames = onlineIds.map((pid) => data.participants?.[pid]?.name || data.players?.[pid]?.name || "Speler");
+ async function loadAvailableRooms() {
+    setRoomListLoading(true);
+    try {
+        const snap = await get(ref(db, "rooms"));
+        if (!snap.exists()) {
+            setAvailableRooms([]);
+            return;
+        }
+
+        const raw = snap.val() || {};
+
+        const list = Object.entries(raw)
+            .map(([code, data]) => {
+                if (!data) return null;
+
+                const players = data.players || {};
+                const presence = data.presence || {};
+
+                // Bepaal welke spelers "online" zijn volgens presence
+                const onlineIds = Object.keys(presence).filter((pid) => hasPresence(data, pid));
+                const onlineNames = onlineIds.map(
+                    (pid) =>
+                        data.participants?.[pid]?.name ||
+                        data.players?.[pid]?.name ||
+                        "Speler"
+                );
+
+                const playerCount = Object.keys(players).length;
+
                 return {
                     code,
-                    started: !!data?.started,
-                    finished: !!data?.finished,
+                    started: !!data.started,
+                    finished: !!data.finished,
+                    playerCount,
                     onlineCount: onlineIds.length,
                     onlineNames,
-                    playerCount: Object.keys(data?.players || {}).length,
-                    hostName: data?.participants?.[data?.hostId]?.name || data?.players?.[data?.hostId]?.name || "Host"
+                    hostName:
+                        data.participants?.[data.hostId]?.name ||
+                        data.players?.[data.hostId]?.name ||
+                        "Host",
                 };
             })
-                .filter((r) => !r.finished && r.onlineCount > 0)
-                .sort((a, b) => (b.onlineCount - a.onlineCount) || ((a.started === b.started) ? 0 : (a.started ? -1 : 1)));
-            setAvailableRooms(list);
-        } finally {
-            setRoomListLoading(false);
-        }
+            .filter(Boolean)
+            // 🔴 HIER WAS HET PROBLEEM:
+            // eerst: .filter((r) => !r.finished && r.onlineCount > 0)
+            // nu: toon alle potjes met spelers die niet "finished" zijn
+            .filter((r) => !r.finished && r.playerCount > 0)
+            // sorteer: eerst meeste online spelers, dan status (bezig / lobby)
+            .sort(
+                (a, b) =>
+                    b.onlineCount - a.onlineCount ||
+                    (a.started === b.started ? 0 : a.started ? -1 : 1)
+            );
+
+        setAvailableRooms(list);
+    } catch (err) {
+        console.error("Kon rooms niet laden:", err);
+        setAvailableRooms([]);
+    } finally {
+        setRoomListLoading(false);
     }
+}
+
 
     function openRoomBrowser() {
         if (!navigator.onLine) { alert("Je bent offline — kan geen rooms ophalen."); return; }
