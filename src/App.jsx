@@ -119,7 +119,7 @@ function Button({ children, onClick, variant, disabled, title }) {
 function DangerButton({ children, onClick }) { return <button onClick={onClick} style={styles.btnDanger}>{children}</button>; }
 function TextArea({ value, onChange, placeholder }) { return <textarea value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={styles.textarea} />; }
 
-function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
+function shuffle(arr) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
 function splitInput(text) { return String(text || "").split(/[\n,]+/).map(s => s.trim()).filter(Boolean); }
 const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
 function randomStartConsonant() { return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)]; }
@@ -452,79 +452,86 @@ export default function PimPamPofWeb() {
         attachRoomListener(code);
     }
 
-async function loadAvailableRooms() {
-    // Wacht tot Firebase anon-auth klaar is (regels kunnen auth vereisen)
-    if (!authReady || !playerId) {
-        console.log("[RoomBrowser] Auth nog niet klaar, geen rooms geladen.");
-        return;
-    }
-
-    setRoomListLoading(true);
-    try {
-        const snap = await get(ref(db, "rooms"));
-
-        if (!snap.exists()) {
-            console.log("[RoomBrowser] Geen rooms node gevonden.");
-            setAvailableRooms([]);
+    // >>>>>>>>>> AANGEPAST: loadAvailableRooms vult nu ook onlineNames in en crasht niet meer <<<<<<<<<<
+    async function loadAvailableRooms() {
+        if (!authReady || !playerId) {
+            console.log("[RoomBrowser] Auth nog niet klaar, geen rooms geladen.");
             return;
         }
 
-        const raw = snap.val() || {};
-        console.log("[RoomBrowser] raw rooms:", raw);
+        setRoomListLoading(true);
+        try {
+            const snap = await get(ref(db, "rooms"));
 
-        const list = Object.entries(raw)
-            .map(([code, data]) => {
-                if (!data) return null;
+            if (!snap.exists()) {
+                console.log("[RoomBrowser] Geen rooms node gevonden.");
+                setAvailableRooms([]);
+                return;
+            }
 
-                const players = data.players || {};
-                const playerCount = Object.keys(players).length;
+            const raw = snap.val() || {};
+            console.log("[RoomBrowser] raw rooms:", raw);
 
-                return {
-                    code,
-                    started: !!data.started,
-                    finished: !!data.finished,
-                    playerCount,
-                    // host-naam uit participants of players
-                    hostName:
-                        data.participants?.[data.hostId]?.name ||
-                        data.players?.[data.hostId]?.name ||
-                        "Host",
-                };
-            })
-            .filter(Boolean)
-            // Toon alle rooms die nog niet finished zijn en minimaal 1 speler hebben
-            .filter((r) => !r.finished && r.playerCount > 0)
-            // Begonnen potjes eerst, daarna lobbies
-            .sort((a, b) => {
-                if (a.started === b.started) return 0;
-                return a.started ? -1 : 1;
-            });
+            const list = Object.entries(raw)
+                .map(([code, data]) => {
+                    if (!data) return null;
 
-        console.log("[RoomBrowser] parsed list:", list);
-        setAvailableRooms(list);
-    } catch (err) {
-        console.error("Kon rooms niet laden:", err);
-        setAvailableRooms([]);
-    } finally {
-        setRoomListLoading(false);
+                    const players = data.players || {};
+                    const presence = data.presence || {};
+
+                    const playerIds = Object.keys(players);
+                    const playerCount = playerIds.length;
+
+                    const onlineNames = playerIds
+                        .filter((pid) => {
+                            const p = presence[pid];
+                            return p && typeof p === "object" && Object.keys(p).length > 0;
+                        })
+                        .map((pid) => players[pid]?.name || "Speler");
+
+                    return {
+                        code,
+                        started: !!data.started,
+                        finished: !!data.finished,
+                        playerCount,
+                        hostName:
+                            data.participants?.[data.hostId]?.name ||
+                            data.players?.[data.hostId]?.name ||
+                            "Host",
+                        onlineNames,
+                    };
+                })
+                .filter(Boolean)
+                .filter((r) => !r.finished && r.playerCount > 0)
+                .sort((a, b) => {
+                    if (a.started === b.started) return 0;
+                    return a.started ? -1 : 1;
+                });
+
+            console.log("[RoomBrowser] parsed list:", list);
+            setAvailableRooms(list);
+        } catch (err) {
+            console.error("Kon rooms niet laden:", err);
+            setAvailableRooms([]);
+        } finally {
+            setRoomListLoading(false);
+        }
     }
-}
 
-function openRoomBrowser() {
-    if (!navigator.onLine) {
-        alert("Je bent offline — kan geen rooms ophalen.");
-        return;
+    function openRoomBrowser() {
+        if (!navigator.onLine) {
+            alert("Je bent offline — kan geen rooms ophalen.");
+            return;
+        }
+
+        if (!authReady || !playerId) {
+            alert("Nog verbinding maken met Firebase… probeer het over een paar seconden opnieuw.");
+            return;
+        }
+
+        setRoomBrowserOpen(true);
+        loadAvailableRooms();
     }
-
-    if (!authReady || !playerId) {
-        alert("Nog verbinding maken met Firebase… probeer het over een paar seconden opnieuw.");
-        return;
-    }
-
-    setRoomBrowserOpen(true);
-    loadAvailableRooms();
-}
-
 
     async function finishGameAndRecord() {
         if (!roomCode || !room) return;
@@ -906,11 +913,8 @@ function openRoomBrowser() {
             const ids = data.players ? Object.keys(data.players) : [];
             if (!ids.length) return null;
 
-            if (!data.hostId || data.hostId === targetId || !data.players[data.hostId]) {
-                data.hostId = data.playersOrder?.[0] || ids[0];
-            }
-
-            if (!data.turn || data.turn === targetId || !data.players[data.turn]) {
+            if (!data.hostId || !data.players[data.hostId]) data.hostId = data.playersOrder?.[0] || ids[0];
+            if (!data.turn || !data.players[data.turn] || data.turn === targetId) {
                 data.turn = data.playersOrder?.[0] || data.hostId || ids[0];
             }
 
@@ -977,7 +981,6 @@ function openRoomBrowser() {
             connIdRef.current = null;
         }
 
-        // detach listener for this room
         if (roomUnsubRef.current) { roomUnsubRef.current(); roomUnsubRef.current = null; }
 
         setRoom(null);
@@ -1153,7 +1156,8 @@ function openRoomBrowser() {
                                         <td><b>{r.code}</b><div className="muted">Host: {r.hostName}</div></td>
                                         <td>{r.started ? "Bezig" : "In lobby"}</td>
                                         <td>{r.playerCount}</td>
-                                        <td>{r.onlineNames.join(", ") || "—"}</td>
+                                        {/* AANGEPAST: veilig checken of onlineNames bestaat */}
+                                        <td>{r.onlineNames && r.onlineNames.length > 0 ? r.onlineNames.join(", ") : "—"}</td>
                                         <td style={{ textAlign: "right" }}>
                                             <Button onClick={() => joinRoom(r.code)}>Join</Button>
                                         </td>
@@ -1249,7 +1253,6 @@ function openRoomBrowser() {
                     <h1 style={styles.h1}>PimPamPof</h1>
 
                     <Row>
-                        {/* Naamveld tonen als er geen spel bezig is */}
                         {!room?.started && !offlineSolo && (
                             <input
                                 style={styles.input}
@@ -1259,7 +1262,6 @@ function openRoomBrowser() {
                             />
                         )}
 
-                        {/* Startscherm (geen room, geen solo) */}
                         {!isOnlineRoom && !offlineSolo && (
                             <>
                                 {!online ? (
@@ -1289,12 +1291,10 @@ function openRoomBrowser() {
                             </>
                         )}
 
-                        {/* Solo actief */}
                         {offlineSolo && (
                             <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
                         )}
 
-                        {/* In een room */}
                         {isOnlineRoom && (
                             <>
                                 {!room?.started && (
@@ -1345,7 +1345,6 @@ function openRoomBrowser() {
                         {!online && !offlineSolo && <span className="muted">start Solo</span>}
                     </Row>
 
-                    {/* Mini-HUD (ronde + duur) */}
                     {(offlineSolo || (isOnlineRoom && room?.started)) && (
                         <div className="mini-hud" style={{ marginTop: 6 }}>
                             <span className="badge">🧭 Ronde: <b>{currentRound}</b></span>
@@ -1354,7 +1353,6 @@ function openRoomBrowser() {
                     )}
                 </header>
 
-                {/* Vraagbeheer (alleen wanneer er geen spel loopt of host pre-game) */}
                 {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && (
                     <>
                         <Section title="Nieuwe vragen (gescheiden met , of enter)">
@@ -1391,7 +1389,6 @@ function openRoomBrowser() {
                     </>
                 )}
 
-                {/* Solo (offline) UI */}
                 {offlineSolo && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -1421,7 +1418,6 @@ function openRoomBrowser() {
                     </Section>
                 )}
 
-                {/* Online game UI */}
                 {isOnlineRoom && room?.started && (
                     <Section>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
@@ -1432,7 +1428,6 @@ function openRoomBrowser() {
                                 </button>
                             </div>
 
-                            {/* Jilla toast */}
                             {(() => {
                                 const active = (() => {
                                     if (!room?.jillaLast) return false;
@@ -1446,7 +1441,6 @@ function openRoomBrowser() {
                                 ) : null;
                             })()}
 
-                            {/* Jilla banner als het jouw beurt is en je in 'jail' zit */}
                             {isMyTurn && myJailCount > 0 && (
                                 <>
                                     <div className="jilla-banner" style={{ marginTop: 4 }}>
@@ -1511,7 +1505,6 @@ function openRoomBrowser() {
                     </Section>
                 )}
 
-                {/* Spelerslijst */}
                 {isOnlineRoom && room?.participants && (
                     <Section title="Spelers">
                         <ul style={styles.list}>
@@ -1557,14 +1550,12 @@ function openRoomBrowser() {
                 </footer>
             </div>
 
-            {/* Dubble Pof toast */}
             {pofShow && (
                 <div className="pof-toast">
                     <div className="pof-bubble">{pofText}</div>
                 </div>
             )}
 
-            {/* Score toast */}
             {scoreToast.show && (
                 <div className="score-toast">
                     <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
@@ -1573,7 +1564,6 @@ function openRoomBrowser() {
                 </div>
             )}
 
-            {/* Leaderboard-overlay */}
             {leaderOpen && leaderData && (
                 <div className="overlay" onClick={() => setLeaderOpen(false)}>
                     <div className="card" onClick={e => e.stopPropagation()}>
@@ -1609,7 +1599,6 @@ function openRoomBrowser() {
                 </div>
             )}
 
-            {/* Room browser + Profiel-overlay */}
             {renderRoomBrowser()}
             {renderProfileOverlay()}
         </>
