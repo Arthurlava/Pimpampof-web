@@ -250,7 +250,13 @@ export default function PimPamPofWeb() {
     const [leaderOpen, setLeaderOpen] = useState(false);
     const [leaderData, setLeaderData] = useState(null);
 
-    useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen)); } catch { } }, [vragen]);
+    useEffect(() => {
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen));
+        } catch (err) {
+            console.warn("Kon vragen niet opslaan in localStorage", err);
+        }
+    }, [vragen]);
 
     /* presence per room */
     useEffect(() => {
@@ -268,7 +274,7 @@ export default function PimPamPofWeb() {
         return () => {
             if (connIdRef.current) {
                 const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
-                remove(myConnRef).catch(() => { });
+                remove(myConnRef).catch((err) => console.warn("Kon presence niet verwijderen", err));
                 connIdRef.current = null;
             }
             if (unsub) unsub();
@@ -870,7 +876,11 @@ export default function PimPamPofWeb() {
             return data;
         });
 
-        try { await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`)); } catch { }
+        try {
+            await remove(ref(db, `rooms/${roomCode}/presence/${targetId}`));
+        } catch (err) {
+            console.warn("Kon presence voor speler niet verwijderen", err);
+        }
     }
 
     function buildLeaderboardSnapshot(rm) {
@@ -922,7 +932,7 @@ export default function PimPamPofWeb() {
 
         if (connIdRef.current) {
             const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connIdRef.current}`);
-            remove(myConnRef).catch(() => { });
+            remove(myConnRef).catch((err) => console.warn("Kon presence niet verwijderen na leaven", err));
             connIdRef.current = null;
         }
 
@@ -1061,7 +1071,11 @@ export default function PimPamPofWeb() {
     }
     function resetStandaardVragen() {
         const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
-        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded)); } catch { }
+        try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+        } catch (err) {
+            console.warn("Kon standaardvragen niet opslaan", err);
+        }
         setVragen(seeded);
         alert("Standaard vragen opnieuw geladen.");
     }
