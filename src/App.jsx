@@ -459,22 +459,19 @@ export default function PimPamPofWeb() {
             if (!snap.exists()) { setAvailableRooms([]); return; }
             const raw = snap.val() || {};
             const list = Object.entries(raw).map(([code, data]) => {
-                const playerIds = Object.keys(data?.players || {});
                 const onlineIds = Object.keys(data?.presence || {}).filter((pid) => hasPresence(data, pid));
-                const onlineNames = (onlineIds.length > 0 ? onlineIds : playerIds)
-                    .map((pid) => data.participants?.[pid]?.name || data.players?.[pid]?.name || "Speler");
-                const onlineCount = onlineIds.length > 0 ? onlineIds.length : playerIds.length;
+                const onlineNames = onlineIds.map((pid) => data.participants?.[pid]?.name || data.players?.[pid]?.name || "Speler");
                 return {
                     code,
                     started: !!data?.started,
                     finished: !!data?.finished,
-                    onlineCount,
+                    onlineCount: onlineIds.length,
                     onlineNames,
-                    playerCount: playerIds.length,
+                    playerCount: Object.keys(data?.players || {}).length,
                     hostName: data?.participants?.[data?.hostId]?.name || data?.players?.[data?.hostId]?.name || "Host"
                 };
             })
-                .filter((r) => !r.finished && (r.onlineCount > 0 || r.playerCount > 0))
+                .filter((r) => !r.finished && r.onlineCount > 0)
                 .sort((a, b) => (b.onlineCount - a.onlineCount) || ((a.started === b.started) ? 0 : (a.started ? -1 : 1)));
             setAvailableRooms(list);
         } finally {
