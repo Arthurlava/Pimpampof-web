@@ -223,6 +223,10 @@ export default function PimPamPofWeb() {
     const [room, setRoom] = useState(null);
     const [isHost, setIsHost] = useState(false);
 
+    const [roomBrowserOpen, setRoomBrowserOpen] = useState(false);
+    const [roomListLoading, setRoomListLoading] = useState(false);
+    const [availableRooms, setAvailableRooms] = useState([]);
+
     const letterRef = useRef(null);
     const connIdRef = useRef(null);
     const roomUnsubRef = useRef(null); // holds onValue unsubscribe
@@ -396,10 +400,10 @@ export default function PimPamPofWeb() {
     const CODE_CHARS = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
     function makeRoomCode(len = 5) { let s = ""; for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * (CODE_CHARS.length))]; return s; }
 
-    async function joinRoom() {
+    async function joinRoom(codeOverride) {
         if (!navigator.onLine) { alert("Je bent offline — joinen kan niet."); return; }
         if (!authReady || !playerId) { alert("Nog verbinding maken…"); return; }
-        const code = (roomCodeInput || "").trim().toUpperCase();
+        const code = (codeOverride ?? roomCodeInput ?? "").trim().toUpperCase();
         if (!code) { alert("Voer een room code in."); return; }
         const r = ref(db, `rooms/${code}`);
         const snap = await get(r);
@@ -437,7 +441,42 @@ export default function PimPamPofWeb() {
 
         setIsHost(false);
         setRoomCode(code);
+        setRoomCodeInput(code);
+        setRoomBrowserOpen(false);
         attachRoomListener(code);
+    }
+
+    async function loadAvailableRooms() {
+        setRoomListLoading(true);
+        try {
+            const snap = await get(ref(db, "rooms"));
+            if (!snap.exists()) { setAvailableRooms([]); return; }
+            const raw = snap.val() || {};
+            const list = Object.entries(raw).map(([code, data]) => {
+                const onlineIds = Object.keys(data?.presence || {}).filter((pid) => hasPresence(data, pid));
+                const onlineNames = onlineIds.map((pid) => data.participants?.[pid]?.name || data.players?.[pid]?.name || "Speler");
+                return {
+                    code,
+                    started: !!data?.started,
+                    finished: !!data?.finished,
+                    onlineCount: onlineIds.length,
+                    onlineNames,
+                    playerCount: Object.keys(data?.players || {}).length,
+                    hostName: data?.participants?.[data?.hostId]?.name || data?.players?.[data?.hostId]?.name || "Host"
+                };
+            })
+                .filter((r) => !r.finished && r.onlineCount > 0)
+                .sort((a, b) => (b.onlineCount - a.onlineCount) || ((a.started === b.started) ? 0 : (a.started ? -1 : 1)));
+            setAvailableRooms(list);
+        } finally {
+            setRoomListLoading(false);
+        }
+    }
+
+    function openRoomBrowser() {
+        if (!navigator.onLine) { alert("Je bent offline — kan geen rooms ophalen."); return; }
+        setRoomBrowserOpen(true);
+        loadAvailableRooms();
     }
 
     async function finishGameAndRecord() {
@@ -1027,6 +1066,52 @@ export default function PimPamPofWeb() {
         alert("Standaard vragen opnieuw geladen.");
     }
 
+    function renderRoomBrowser() {
+        if (!roomBrowserOpen) return null;
+        return (
+            <div className="overlay" onClick={() => setRoomBrowserOpen(false)}>
+                <div className="card" onClick={(e) => e.stopPropagation()}>
+                    <h2 style={{ marginTop: 0, marginBottom: 6 }}>🔎 Beschikbare rooms</h2>
+                    <p className="muted" style={{ marginTop: 0 }}>Klik op een room om direct mee te doen.</p>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                        <Button onClick={loadAvailableRooms} disabled={roomListLoading}>🔄 Vernieuwen</Button>
+                        <Button variant="alt" onClick={() => setRoomBrowserOpen(false)}>Sluiten</Button>
+                    </div>
+                    {roomListLoading ? (
+                        <div className="muted">Bezig met laden…</div>
+                    ) : availableRooms.length === 0 ? (
+                        <div className="muted">Geen actieve rooms gevonden.</div>
+                    ) : (
+                        <table className="table">
+                            <thead>
+                                <tr>
+                                    <th>Room</th>
+                                    <th>Status</th>
+                                    <th>Spelers</th>
+                                    <th>Online</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {availableRooms.map((r) => (
+                                    <tr key={r.code}>
+                                        <td><b>{r.code}</b><div className="muted">Host: {r.hostName}</div></td>
+                                        <td>{r.started ? "Bezig" : "In lobby"}</td>
+                                        <td>{r.playerCount}</td>
+                                        <td>{r.onlineNames.join(", ") || "—"}</td>
+                                        <td style={{ textAlign: "right" }}>
+                                            <Button onClick={() => joinRoom(r.code)}>Join</Button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    )}
+                </div>
+            </div>
+        );
+    }
+
     /* Profiel (match history + highscore) */
     const [profileOpen, setProfileOpen] = useState(false);
     const [profile, setProfile] = useState(null);
@@ -1132,6 +1217,7 @@ export default function PimPamPofWeb() {
                                         <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>
                                             Room aanmaken
                                         </Button>
+                                        <Button variant="alt" onClick={openRoomBrowser}>Rooms bekijken</Button>
                                         <input
                                             style={styles.input}
                                             placeholder="Room code"
@@ -1468,7 +1554,8 @@ export default function PimPamPofWeb() {
                 </div>
             )}
 
-            {/* Profiel-overlay */}
+            {/* Room browser + Profiel-overlay */}
+            {renderRoomBrowser()}
             {renderProfileOverlay()}
         </>
     );
