@@ -13,6 +13,7 @@ const MAX_POINTS = 200;
 const DOUBLE_POF_BONUS = 100;
 const JILLA_PENALTY = 25;
 const COOLDOWN_MS = 5000;
+const OFFLINE_MULTI_MAX_PLAYERS = 20;
 const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
 const PRIOR_MEAN = 80;
 const PRIOR_WEIGHT = 10;
@@ -26,11 +27,45 @@ const GlobalStyle = () => (
   <style>{`
     html, body, #root { height: 100%; }
     body { margin: 0; background: linear-gradient(180deg, #171717 0%, #262626 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-    #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px; box-sizing: border-box; display: block !important; float: none !important; }
-    input, button, textarea { font-family: inherit; }
+   #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px 120px; box-sizing: border-box; display: block !important; float: none !important; }
     .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); font-size: 12px; }
     .muted { color: rgba(255,255,255,0.7); font-size:12px; }
     .mini-hud { display:flex; gap:8px; flex-wrap:wrap; }
+.scorebar {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 12px;
+  width: min(100%, 720px);
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 10px 10px;
+  border-radius: 16px;
+  background: rgba(0,0,0,0.35);
+  border: 1px solid rgba(255,255,255,0.12);
+  backdrop-filter: blur(6px);
+  z-index: 5000;
+  pointer-events: auto;
+}
+
+.scorechip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.scorechip-active {
+  background: rgba(22,163,74,0.18);
+  border-color: rgba(22,163,74,0.35);
+}
 
     @keyframes pofPop {
       0%{transform:scale(0.6);opacity:0;}
@@ -551,7 +586,7 @@ function computeNextTurnIxWithJail(players, currentIx, jailMap) {
 }
 
 function startOfflineMultiFromSetup() {
-  const n = clampInt(offmPlayerCount, 2, 8);
+const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   const rawNames = (offmNames || []).slice(0, n).map(s => String(s || "").trim());
   const names = rawNames.map((nm, i) => nm || `Speler ${i + 1}`);
   const players = names.map(name => ({ id: crypto.randomUUID(), name }));
@@ -684,6 +719,7 @@ function offlineMultiJilla() {
 }
 
 function renderOfflineMultiSetup() {
+  const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   if (!offmSetupOpen) return null;
   const n = clampInt(offmPlayerCount, 2, 8);
   return (
@@ -696,20 +732,23 @@ function renderOfflineMultiSetup() {
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
           <span className="badge">Spelers</span>
-          <select
+          <input
+            type="number"
+            min={2}
+            max={OFFLINE_MULTI_MAX_PLAYERS}
+            step={1}
             value={n}
             onChange={(e) => {
-              const next = clampInt(parseInt(e.target.value, 10), 2, 8);
+              const parsed = parseInt(e.target.value, 10);
+              const next = clampInt(parsed, 2, OFFLINE_MULTI_MAX_PLAYERS);
               setOffmPlayerCount(next);
               setOffmNames(prev => Array.from({ length: next }, (_, i) => String(prev?.[i] ?? "")));
             }}
             style={{ ...styles.input, width: 120 }}
-          >
-            {Array.from({ length: 7 }, (_, i) => i + 2).map(x => (
-              <option key={x} value={x}>{x}</option>
-            ))}
-          </select>
+          />
+          <span className="muted">min 2, max {OFFLINE_MULTI_MAX_PLAYERS}</span>
         </div>
+
 
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
           {Array.from({ length: n }, (_, i) => (
@@ -1872,6 +1911,64 @@ const matchStartedAt = isOnlineRoom
     const off = onValue(profRef, snap => setProfile(snap.val() || null));
     return () => off();
   }, [playerId]);
+function renderBottomScoreBar() {
+  // Offline multiplayer
+  if (offlineMulti && offmPlayers?.length) {
+    return (
+      <div className="scorebar">
+        {offmPlayers.map((p, ix) => {
+          const score = offmScores?.[p.id] ?? 0;
+          const jail = offmJail?.[p.id] ?? 0;
+          const active = ix === offmTurnIx;
+          return (
+            <div
+              key={p.id}
+              className={`scorechip${active ? " scorechip-active" : ""}`}
+              title={jail > 0 ? `Jilla: ${jail}x` : ""}
+            >
+              <b>{p.name}</b>
+              <span>{score}</span>
+              {jail > 0 ? <span>🔒x{jail}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // Online multiplayer (optioneel maar meestal gewenst als je “zoals online” bedoelt)
+  if (isOnlineRoom && room?.started && !room?.solo && room?.players) {
+    const ids = (Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+      .filter((id) => room.players && room.players[id]);
+
+    if (!ids.length) return null;
+
+    return (
+      <div className="scorebar">
+        {ids.map((id) => {
+          const name = room.participants?.[id]?.name || room.players?.[id]?.name || "Speler";
+          const score = room.scores?.[id] ?? 0;
+          const jail = room.jail?.[id] ?? 0;
+          const active = room.turn === id;
+
+          return (
+            <div
+              key={id}
+              className={`scorechip${active ? " scorechip-active" : ""}`}
+              title={jail > 0 ? `Jilla: ${jail}x` : ""}
+            >
+              <b>{name}</b>
+              <span>{score}</span>
+              {jail > 0 ? <span>🔒x{jail}</span> : null}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return null;
+}
 
   function renderProfileOverlay() {
     if (!profileOpen) return null;
@@ -2154,23 +2251,6 @@ const matchStartedAt = isOnlineRoom
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
       <div className="badge">Offline multiplayer</div>
 
-      <Row>
-        {offmPlayers.map((p, ix) => {
-          const score = offmScores?.[p.id] ?? 0;
-          const jail = offmJail?.[p.id] ?? 0;
-          const active = ix === offmTurnIx;
-          return (
-            <span
-              key={p.id}
-              className="badge"
-              style={active ? { background: "rgba(22,163,74,0.18)" } : undefined}
-            >
-              <b>{p.name}</b>: {score}{jail > 0 ? ` 🔒x${jail}` : ""}
-            </span>
-          );
-        })}
-      </Row>
-
       {(() => {
         const active = offmJillaLast && (Date.now() - (offmJillaLast.at || 0) < 2000);
         return active ? (
@@ -2413,7 +2493,7 @@ const matchStartedAt = isOnlineRoom
 </footer>
 
       </div>
-
+      {renderBottomScoreBar()}
       {pofShow && (
         <div className="pof-toast">
           <div className="pof-bubble">{pofText}</div>
