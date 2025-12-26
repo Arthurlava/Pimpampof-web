@@ -2398,18 +2398,20 @@ const matchStartedAt = isOnlineRoom
           </Section>
         )}
 
-        <footer style={styles.foot}>
-{isOnlineRoom
-  ? (room?.solo
-    ? "Solo: timer & punten actief."
-    : "Multiplayer: timer & punten actief (5s cooldown).")
-: (offlineSolo
-  ? "Offline solo actief."
-  : (offlineMulti
-    ? "Offline multiplayer actief (5s cooldown)."
-    : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline).")))
-
+<footer style={styles.foot}>
+  {isOnlineRoom}
+    ? (room?.solo
+        ? "Solo: timer & punten actief."
+        : "Multiplayer: timer & punten actief (5s cooldown).")
+    : (offlineSolo
+        ? "Offline solo actief."
+        : (offlineMulti
+            ? "Offline multiplayer actief (5s cooldown)."
+            : (online
+                ? "Maak een room of start Solo (offline)."
+                : "Offline — start Solo (offline).")))}
 </footer>
+
       </div>
 
       {pofShow && (
