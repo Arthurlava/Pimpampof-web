@@ -291,37 +291,92 @@ export default function PimPamPofWeb() {
 
   const online = useOnline();
 
-  // OFFLINE SOLO
-  const [offlineSolo, setOfflineSolo] = useState(false);
-  const [offIndex, setOffIndex] = useState(-1);
-  const [offLastLetter, setOffLastLetter] = useState("?");
-  const [offOrder, setOffOrder] = useState([]);
-  const [offStartedAt, setOffStartedAt] = useState(null);
+// OFFLINE SOLO
+const [offlineSolo, setOfflineSolo] = useState(false);
+const [offIndex, setOffIndex] = useState(-1);
+const [offLastLetter, setOffLastLetter] = useState("?");
+const [offOrder, setOffOrder] = useState([]);
+const [offStartedAt, setOffStartedAt] = useState(null);
 
-  function startOffline() {
-    const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
-    if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
-    setOfflineSolo(true);
-    setOffOrder(shuffle([...Array(qs.length).keys()]));
-    setOffIndex(0);
-    setOffLastLetter(randomStartConsonant());
-    setOffStartedAt(Date.now());
-    setTimeout(() => letterRef.current?.focus(), 0);
+const [offTurnStartAt, setOffTurnStartAt] = useState(null);
+const [offScore, setOffScore] = useState(0);
+const [offAnswered, setOffAnswered] = useState(0);
+const [offTotalTimeMs, setOffTotalTimeMs] = useState(0);
+const [offJillaCount, setOffJillaCount] = useState(0);
+const [offDoubleCount, setOffDoubleCount] = useState(0);
+
+function startOffline() {
+  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+
+  setOfflineSolo(true);
+  setOffOrder(shuffle([...Array(qs.length).keys()]));
+  setOffIndex(0);
+  setOffLastLetter(randomStartConsonant());
+  const t = Date.now();
+  setOffStartedAt(t);
+
+  setOffTurnStartAt(t);
+  setOffScore(0);
+  setOffAnswered(0);
+  setOffTotalTimeMs(0);
+  setOffJillaCount(0);
+  setOffDoubleCount(0);
+
+  setTimeout(() => letterRef.current?.focus(), 0);
+}
+
+function stopOffline() {
+  setOfflineSolo(false);
+  setOffIndex(-1);
+  setOffLastLetter("?");
+  setOffStartedAt(null);
+  setOffTurnStartAt(null);
+}
+
+function onOfflineLetterChanged(e) {
+  const val = normalizeLetter(e.target.value);
+  if (val.length !== 1) return;
+
+  const required = normalizeLetter(offLastLetter);
+  const isDouble = required && required !== "?" && val === required;
+
+  const elapsed = Math.max(0, Date.now() - (offTurnStartAt ?? Date.now()));
+  const basePoints = calcPoints(elapsed);
+  const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
+  const gain = basePoints + bonus;
+
+  setOffScore(s => s + gain);
+  setOffAnswered(c => c + 1);
+  setOffTotalTimeMs(t => t + elapsed);
+  if (isDouble) setOffDoubleCount(c => c + 1);
+
+  setOffLastLetter(val);
+  setOffIndex(i => (i + 1) % (offOrder.length || 1));
+  setOffTurnStartAt(Date.now());
+
+  if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+  if (gain > 0) {
+    triggerScoreToast(
+      `+${gain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`,
+      "plus"
+    );
   }
-  function stopOffline() {
-    setOfflineSolo(false);
-    setOffIndex(-1);
-    setOffLastLetter("?");
-    setOffStartedAt(null);
-  }
-  function onOfflineLetterChanged(e) {
-    const val = normalizeLetter(e.target.value);
-    if (val.length === 1) {
-      setOffLastLetter(val);
-      setOffIndex(i => (i + 1) % (offOrder.length || 1));
-      e.target.value = '';
-    }
-  }
+
+  e.target.value = "";
+}
+
+function offlineJilla() {
+  if (!offlineSolo) return;
+  if (!offOrder || offOrder.length === 0) return;
+
+  setOffScore(s => s - JILLA_PENALTY);
+  setOffJillaCount(c => c + 1);
+  setOffIndex(i => (i + 1) % (offOrder.length || 1));
+  setOffTurnStartAt(Date.now());
+
+  triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
+}
 
   // ONLINE
   const [roomCodeInput, setRoomCodeInput] = useState("");
@@ -818,7 +873,7 @@ export default function PimPamPofWeb() {
       lastLetter: nextStartLetter,
       turn: room.playersOrder?.[0] || room.hostId,
       phase: "answer",
-      turnStartAt: room.solo ? null : Date.now(),
+      turnStartAt: Date.now(),
       cooldownEndAt: null,
       startedAt: Date.now(),
       startOrder: safeStartOrder,
@@ -873,9 +928,9 @@ export default function PimPamPofWeb() {
 
       d.phase = p.phase || "answer";
       d.cooldownEndAt = p.cooldownEndAt || null;
-      d.turnStartAt = p.turnStartAt || (d.solo ? null : Date.now());
+      d.turnStartAt = (p.turnStartAt != null) ? p.turnStartAt : Date.now();
 
-      if (!d.solo && p.scoreDelta) {
+if (p.scoreDelta) {
         if (!d.scores) d.scores = {};
         d.scores[act.by] = Math.max(0, (d.scores[act.by] || 0) - p.scoreDelta);
 
@@ -925,95 +980,99 @@ export default function PimPamPofWeb() {
     });
   }
 
-  async function submitLetterOnline(letter) {
-    if (!room || room.paused) return;
+async function submitLetterOnline(letter) {
+  if (!room || room.paused) return;
 
-    const isMP = !!room && !room.solo;
-    const elapsed = Math.max(0, Date.now() - (room?.turnStartAt ?? Date.now()));
-    const basePoints = isMP ? calcPoints(elapsed) : 0;
+  const elapsedUi = room?.turnStartAt ? Math.max(0, Date.now() - room.turnStartAt) : 0;
+  const basePointsUi = calcPoints(elapsedUi);
+  const requiredUi = normalizeLetter(room?.lastLetter);
+  const isDoubleUi = requiredUi && requiredUi !== "?" && normalizeLetter(letter) === requiredUi;
+  const bonusUi = isDoubleUi ? DOUBLE_POF_BONUS : 0;
+  const totalGainUi = basePointsUi + bonusUi;
 
-    const required = normalizeLetter(room?.lastLetter);
-    const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
-    const bonus = isMP && isDouble ? DOUBLE_POF_BONUS : 0;
-    const totalGain = basePoints + bonus;
+  const r = ref(db, `rooms/${roomCode}`);
+  await runTransaction(r, (data) => {
+    if (!data || data.paused) return data;
 
-    const r = ref(db, `rooms/${roomCode}`);
-    await runTransaction(r, (data) => {
-      if (!data || data.paused) return data;
-
-      if (!data.players || !data.players[data.turn]) {
-        const ids = data.players ? Object.keys(data.players) : [];
-        if (!ids.length) return null;
-        data.playersOrder = (Array.isArray(data.playersOrder) ? data.playersOrder : ids).filter(id => ids.includes(id));
-        data.turn = data.playersOrder[0] || ids[0];
-      }
-
-      if (data.turn !== playerId) return data;
-      if (data.phase !== "answer") return data;
-      const listLen = (data.order?.length ?? 0);
-      if (!listLen) return data;
-
-      const isMP2 = !!data && !data.solo;
-
-      const prev = {
-        currentIndex: data.currentIndex,
-        lastLetter: data.lastLetter,
-        turn: data.turn,
-        phase: data.phase,
-        cooldownEndAt: data.cooldownEndAt || null,
-        turnStartAt: data.turnStartAt || null,
-        lastRequired: data.lastRequired || null,
-        lastAnswerBy: data.lastAnswerBy || null,
-        lastAnswerWasDouble: !!data.lastAnswerWasDouble,
-        scoreDelta: isMP2 ? (basePoints + bonus) : 0,
-        statDelta: isMP2 ? { timeMs: elapsed, answered: 1, double: isDouble ? 1 : 0 } : null,
-      };
-
-      if (isMP2) {
-        if (!data.scores) data.scores = {};
-        data.scores[playerId] = (data.scores[playerId] || 0) + (basePoints + bonus);
-
-        if (!data.stats) data.stats = {};
-        const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
-        s.totalTimeMs += elapsed;
-        s.answeredCount += 1;
-        if (isDouble) s.doubleCount += 1;
-        data.stats[playerId] = s;
-      }
-
-      data.lastRequired = required || null;
-      data.lastAnswerBy = playerId;
-      data.lastAnswerWasDouble = !!isDouble;
-
-      data.lastLetter = letter;
-      data.currentIndex = (data.currentIndex + 1) % listLen;
-
-      advanceTurnWithJail(data);
-
-      if (isMP2) {
-        data.phase = "cooldown";
-        data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-        data.turnStartAt = null;
-      } else {
-        data.phase = "answer";
-        data.turnStartAt = null;
-        data.cooldownEndAt = null;
-      }
-
-      data.lastAction = { type: "answer", by: playerId, at: Date.now(), prev };
-      data.lastEvent = { type: "answer_submit", by: playerId, at: Date.now(), toTurn: data.turn };
-      data.lastActivityAt = Date.now();
-      return data;
-    });
-
-    if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
-    if (isMP && totalGain > 0) {
-      triggerScoreToast(
-        `+${totalGain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`,
-        "plus"
-      );
+    if (!data.players || !data.players[data.turn]) {
+      const ids = data.players ? Object.keys(data.players) : [];
+      if (!ids.length) return null;
+      data.playersOrder = (Array.isArray(data.playersOrder) ? data.playersOrder : ids).filter(id => ids.includes(id));
+      data.turn = data.playersOrder[0] || ids[0];
     }
+
+    if (data.turn !== playerId) return data;
+    if (data.phase !== "answer") return data;
+
+    const listLen = (data.order?.length ?? 0);
+    if (!listLen) return data;
+
+    const required = normalizeLetter(data.lastLetter);
+    const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
+
+    const elapsed = data.turnStartAt ? Math.max(0, Date.now() - data.turnStartAt) : 0;
+    const basePoints = calcPoints(elapsed);
+    const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
+    const scoreDelta = basePoints + bonus;
+
+    const prev = {
+      currentIndex: data.currentIndex,
+      lastLetter: data.lastLetter,
+      turn: data.turn,
+      phase: data.phase,
+      cooldownEndAt: data.cooldownEndAt || null,
+      turnStartAt: data.turnStartAt || null,
+      lastRequired: data.lastRequired || null,
+      lastAnswerBy: data.lastAnswerBy || null,
+      lastAnswerWasDouble: !!data.lastAnswerWasDouble,
+      scoreDelta,
+      statDelta: { timeMs: elapsed, answered: 1, double: isDouble ? 1 : 0 },
+    };
+
+    if (!data.scores) data.scores = {};
+    data.scores[playerId] = (data.scores[playerId] || 0) + scoreDelta;
+
+    if (!data.stats) data.stats = {};
+    const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+    s.totalTimeMs += elapsed;
+    s.answeredCount += 1;
+    if (isDouble) s.doubleCount += 1;
+    data.stats[playerId] = s;
+
+    data.lastRequired = required || null;
+    data.lastAnswerBy = playerId;
+    data.lastAnswerWasDouble = !!isDouble;
+
+    data.lastLetter = letter;
+    data.currentIndex = (data.currentIndex + 1) % listLen;
+
+    advanceTurnWithJail(data);
+
+    if (data.solo) {
+      data.phase = "answer";
+      data.turnStartAt = Date.now();
+      data.cooldownEndAt = null;
+    } else {
+      data.phase = "cooldown";
+      data.cooldownEndAt = Date.now() + COOLDOWN_MS;
+      data.turnStartAt = null;
+    }
+
+    data.lastAction = { type: "answer", by: playerId, at: Date.now(), prev };
+    data.lastEvent = { type: "answer_submit", by: playerId, at: Date.now(), toTurn: data.turn };
+    data.lastActivityAt = Date.now();
+    return data;
+  });
+
+  if (isDoubleUi) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+  if (totalGainUi > 0) {
+    triggerScoreToast(
+      `+${totalGainUi} punten${isDoubleUi ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`,
+      "plus"
+    );
   }
+}
+
 
   async function changeLastLetter() {
     if (!roomCode || !room || !room.started) return;
@@ -1083,53 +1142,55 @@ export default function PimPamPofWeb() {
     }
   }
 
-  async function useJilla() {
-    if (!room || room.paused) return;
-    const isMP = !!room && !room.solo;
+ async function useJilla() {
+  if (!room || room.paused) return;
 
-    const r = ref(db, `rooms/${roomCode}`);
-    await runTransaction(r, (data) => {
-      if (!data || data.paused) return data;
+  const r = ref(db, `rooms/${roomCode}`);
+  await runTransaction(r, (data) => {
+    if (!data || data.paused) return data;
 
-      if (!data.players || !data.players[data.turn]) return data;
-      if (data.turn !== playerId) return data;
-      if (data.phase !== "answer") return data;
+    if (!data.players || !data.players[data.turn]) return data;
+    if (data.turn !== playerId) return data;
+    if (data.phase !== "answer") return data;
 
-      const listLen = (data.order?.length ?? 0);
-      if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen;
+    const listLen = (data.order?.length ?? 0);
+    if (listLen > 0) data.currentIndex = (data.currentIndex + 1) % listLen;
 
+    if (!data.solo) {
       if (!data.jail) data.jail = {};
       data.jail[playerId] = (data.jail[playerId] || 0) + 1;
+    }
 
-      if (!data.participants) data.participants = {};
-      const whoName = (data.participants[playerId]?.name) || (data.players?.[playerId]?.name) || "Speler";
-      data.jillaLast = { pid: playerId, name: whoName, at: Date.now() };
+    if (!data.participants) data.participants = {};
+    const whoName = (data.participants[playerId]?.name) || (data.players?.[playerId]?.name) || "Speler";
+    data.jillaLast = { pid: playerId, name: whoName, at: Date.now() };
 
-      if (isMP) {
-        if (!data.scores) data.scores = {};
-        data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY;
+    if (!data.scores) data.scores = {};
+    data.scores[playerId] = (data.scores[playerId] || 0) - JILLA_PENALTY;
 
-        if (!data.stats) data.stats = {};
-        const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
-        s.jillaCount += 1;
-        data.stats[playerId] = s;
+    if (!data.stats) data.stats = {};
+    const s = data.stats[playerId] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+    s.jillaCount += 1;
+    data.stats[playerId] = s;
 
-        data.phase = "cooldown";
-        data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-        data.turnStartAt = null;
-      } else {
-        data.phase = "answer";
-        data.turnStartAt = null;
-        data.cooldownEndAt = null;
-      }
+    if (data.solo) {
+      data.phase = "answer";
+      data.turnStartAt = Date.now();
+      data.cooldownEndAt = null;
+    } else {
+      data.phase = "cooldown";
+      data.cooldownEndAt = Date.now() + COOLDOWN_MS;
+      data.turnStartAt = null;
+    }
 
-      advanceTurnWithJail(data);
-      data.lastActivityAt = Date.now();
-      return data;
-    });
+    advanceTurnWithJail(data);
+    data.lastActivityAt = Date.now();
+    return data;
+  });
 
-    if (isMP) triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
-  }
+  triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
+}
+
 
   async function kickPlayer(targetId) {
     if (!roomCode || !targetId) return;
@@ -1314,9 +1375,13 @@ export default function PimPamPofWeb() {
   const inCooldown = room?.phase === "cooldown" && !room?.solo;
   const effectiveNow = room?.paused ? (room?.pausedAt || now) : now;
   const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - effectiveNow);
-  const answerElapsedMs = (!room?.solo && room?.phase === "answer" && room?.turnStartAt)
-    ? Math.max(0, effectiveNow - room.turnStartAt) : 0;
-  const potentialPoints = !room?.solo ? calcPoints(answerElapsedMs) : 0;
+const answerElapsedMs = (room?.phase === "answer" && room?.turnStartAt)
+  ? Math.max(0, effectiveNow - room.turnStartAt) : 0;
+const potentialPoints = calcPoints(answerElapsedMs);
+
+const offElapsedMs = (offlineSolo && offTurnStartAt) ? Math.max(0, now - offTurnStartAt) : 0;
+const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
+
 
   const roundSize = (isOnlineRoom && room?.started)
     ? Math.max(
@@ -1690,6 +1755,24 @@ export default function PimPamPofWeb() {
           <Section>
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
               <div className="badge">Solo</div>
+<Row>
+  <span className="badge">🏅 Punten: <b>{offScore}</b></span>
+  <span className="badge">✅ Antwoorden: <b>{offAnswered}</b></span>
+  <span className="badge">🔒 Jilla: <b>{offJillaCount}</b></span>
+  <span className="badge">✨ Dubble pof: <b>{offDoubleCount}</b></span>
+</Row>
+
+<Row>
+  <span className="badge">
+    ⏱️ Tijd: {Math.floor(offElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+  </span>
+  <span className="badge">
+    🏅 Punten als je nu antwoordt: <b>{offPotentialPoints}</b>
+  </span>
+  <span className="badge">
+    Gem. tijd / vraag: <b>{offAnswered > 0 ? `${(offTotalTimeMs / offAnswered / 1000).toFixed(1)}s` : "—"}</b>
+  </span>
+</Row>
 
               <div style={{ fontSize: 18 }}>
                 Laatste letter: <span style={{ fontWeight: 700 }}>{offLastLetter}</span>
@@ -1711,6 +1794,10 @@ export default function PimPamPofWeb() {
                 placeholder="Typ de laatste letter…"
                 style={styles.letterInput}
               />
+              <div style={{ marginTop: 6 }}>
+  <Button variant="stop" onClick={offlineJilla}>Jilla (vraag overslaan)</Button>
+</div>
+
             </div>
           </Section>
         )}
@@ -1765,6 +1852,17 @@ export default function PimPamPofWeb() {
                     <div className="badge">
                       ⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s
                     </div>
+                  {room.solo && (
+  <Row>
+    <span className="badge">
+      ⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+    </span>
+    <span className="badge">
+      🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b>
+    </span>
+  </Row>
+)}
+
                   ) : (
                     <Row>
                       <span className="badge">
@@ -1824,7 +1922,7 @@ export default function PimPamPofWeb() {
                   const active = room.turn === id;
                   const jcount = (room.jail && room.jail[id]) || 0;
                   const showKick = id !== (playerId || "");
-                  const score = (!room.solo && room.scores && room.scores[id]) || 0;
+                  const score = (room.scores && room.scores[id]) || 0;
                   const hot = room?.jillaLast?.pid === id && (Date.now() - (room?.jillaLast?.at || 0) < 2000);
                   const onlineNow = hasPresence(room, id);
 
@@ -1856,6 +1954,7 @@ export default function PimPamPofWeb() {
                           <>
                             <span style={{ margin: "0 6px" }}> </span>
                             <span className="badge">Punten: <b>{score}</b></span>
+
                           </>
                         )}
                       </div>
@@ -1872,7 +1971,7 @@ export default function PimPamPofWeb() {
 
         <footer style={styles.foot}>
           {isOnlineRoom
-            ? (room?.solo ? "Solo modus (geen timer/punten)." : "Multiplayer: timer & punten actief (5s cooldown).")
+            room?.solo ? "Solo: timer & punten actief." : "Multiplayer: timer & punten actief (5s cooldown)."
             : (offlineSolo
               ? "Offline solo actief."
               : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline)."))}
