@@ -221,6 +221,15 @@ const DEFAULT_VRAGEN = [
   "Noem iets wat je op een feest kan vinden.",
   "Noem iets dat je op een kaart vindt."
 ];
+const WHATS_NEW = {
+  updatedAtLabel: "26 dec 2025",
+  items: [
+    "Offline multiplayer toegevoegd. multiplayer met punten op een apperaat!",
+    "Fixed: Offline spelers worden niet meer geskipped!",
+  ],
+};
+
+const WHATS_NEW_COLLAPSE_KEY = "ppp.whatsnew.collapsed";
 
 
 /* ---------- styles ---------- */
@@ -425,6 +434,12 @@ export default function PimPamPofWeb() {
   }, []);
 
   const online = useOnline();
+const [whatsOpen, setWhatsOpen] = useState(() => {
+  try { return localStorage.getItem(WHATS_NEW_COLLAPSE_KEY) !== "1"; } catch { return true; }
+});
+useEffect(() => {
+  try { localStorage.setItem(WHATS_NEW_COLLAPSE_KEY, whatsOpen ? "0" : "1"); } catch { }
+}, [whatsOpen]);
 
 // OFFLINE SOLO
 const [offlineSolo, setOfflineSolo] = useState(false);
@@ -2135,6 +2150,27 @@ function renderBottomScoreBar() {
             </div>
           )}
         </header>
+        {!offlineSolo && !offlineMulti && !room?.started && (
+  <Section title={`Wat is nieuw (${WHATS_NEW.updatedAtLabel})`}>
+    <Row>
+      <span className="muted" style={{ maxWidth: 520, textAlign: "left" }}>
+        Updates en veranderingen in de game.
+      </span>
+      <Button variant="alt" onClick={() => setWhatsOpen(o => !o)}>
+        {whatsOpen ? "Verberg" : "Toon"}
+      </Button>
+    </Row>
+
+    {whatsOpen && (
+      <ul style={{ margin: "10px 0 0 18px", textAlign: "left", lineHeight: 1.55 }}>
+        {WHATS_NEW.items.map((t, i) => (
+          <li key={i} style={{ marginBottom: 6 }}>{t}</li>
+        ))}
+      </ul>
+    )}
+  </Section>
+)}
+
           {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
           <>
             <Section title="Nieuwe vragen (gescheiden met , of enter)">
