@@ -719,9 +719,10 @@ function offlineMultiJilla() {
 }
 
 function renderOfflineMultiSetup() {
-  const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   if (!offmSetupOpen) return null;
-  const n = clampInt(offmPlayerCount, 2, 8);
+
+  const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
+
   return (
     <div className="overlay" onClick={() => setOffmSetupOpen(false)}>
       <div className="card" onClick={(e) => e.stopPropagation()}>
@@ -748,7 +749,6 @@ function renderOfflineMultiSetup() {
           />
           <span className="muted">min 2, max {OFFLINE_MULTI_MAX_PLAYERS}</span>
         </div>
-
 
         <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
           {Array.from({ length: n }, (_, i) => (
@@ -777,6 +777,7 @@ function renderOfflineMultiSetup() {
     </div>
   );
 }
+
 
   // ONLINE
   const [roomCodeInput, setRoomCodeInput] = useState("");
@@ -2479,7 +2480,7 @@ function renderBottomScoreBar() {
         )}
 
 <footer style={styles.foot}>
-  {isOnlineRoom}
+  {isOnlineRoom
     ? (room?.solo
         ? "Solo: timer & punten actief."
         : "Multiplayer: timer & punten actief (5s cooldown).")
