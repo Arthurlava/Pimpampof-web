@@ -227,7 +227,7 @@ const WHATS_NEW = {
   items: [
     "Offline multiplayer toegevoegd. multiplayer met punten op een apperaat!",
     "Solo Modus heeft nu ook punten!",
-    "Check Woord knop toegevoegd voor als je niet zekr weet of een woord bestaat!",
+    "Check Woord knop toegevoegd voor als je niet zeker weet of een woord bestaat!",
     "Fixed: Offline spelers worden niet meer geskipped!",
   ],
 };
