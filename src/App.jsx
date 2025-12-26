@@ -225,6 +225,7 @@ const WHATS_NEW = {
   updatedAtLabel: "26 dec 2025",
   items: [
     "Offline multiplayer toegevoegd. multiplayer met punten op een apperaat!",
+    "Solo Modus heeft nu ook punten!",
     "Fixed: Offline spelers worden niet meer geskipped!",
   ],
 };
