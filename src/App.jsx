@@ -18,6 +18,7 @@ const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mt
 const PRIOR_MEAN = 80;
 const PRIOR_WEIGHT = 10;
 const MIN_ANS_FOR_BEST = 5;
+const WORDCHECK_AI_ENDPOINT = import.meta.env.VITE_WORDCHECK_ENDPOINT || "";
 
 // Rooms die langer dan 4 minuten inactief zijn en niemand online hebben, worden opgeruimd
 const STALE_ROOM_MS = 4 * 60 * 1000;
@@ -284,6 +285,62 @@ onAuthStateChanged(auth, (user) => {
 });
 
 /* ---------- helpers ---------- */
+function normalizeWordForCheck(raw) {
+  const s = String(raw || "").trim().replace(/\s+/g, " ");
+  return s.length > 80 ? s.slice(0, 80) : s;
+}
+async function checkWordViaAiEndpoint(word, endpoint, signal) {
+  const res = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ word }),
+    signal
+  });
+
+  if (!res.ok) throw new Error(`AI endpoint HTTP ${res.status}`);
+
+  const json = await res.json();
+  return {
+    exists: !!json.exists,
+    source: "AI",
+    url: json.url || getWiktionaryUrl(word),
+    note: json.note || null
+  };
+}
+
+function getWiktionaryUrl(word) {
+  const title = normalizeWordForCheck(word).replace(/\s+/g, "_");
+  return `https://nl.wiktionary.org/wiki/${encodeURIComponent(title)}`;
+}
+
+function getGoogleMeaningUrl(word) {
+  const q = `${normalizeWordForCheck(word)} betekenis`;
+  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+}
+
+async function checkWordViaNlWiktionary(word, signal) {
+  const endpoint = "https://nl.wiktionary.org/w/api.php";
+  const url =
+    `${endpoint}?action=query&titles=${encodeURIComponent(word)}` +
+    `&format=json&redirects=1&origin=*`;
+
+  const res = await fetch(url, { method: "GET", signal });
+  if (!res.ok) throw new Error(`Wiktionary HTTP ${res.status}`);
+
+  const json = await res.json();
+  const pages = json?.query?.pages;
+  if (!pages || typeof pages !== "object") throw new Error("Unexpected Wiktionary response.");
+
+  const firstKey = Object.keys(pages)[0];
+  const page = pages[firstKey] || null;
+
+  const exists = firstKey !== "-1" && !page?.missing;
+  return {
+    exists,
+    source: "Wiktionary",
+    url: getWiktionaryUrl(word),
+  };
+}
 function calcPoints(ms) {
   const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
   return Math.max(0, p);
@@ -733,7 +790,189 @@ function offlineMultiJilla() {
 
   triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
 }
+const [wordCheckOpen, setWordCheckOpen] = useState(false);
+const [wordCheckWord, setWordCheckWord] = useState("");
+const [wordCheckBusy, setWordCheckBusy] = useState(false);
+const [wordCheckError, setWordCheckError] = useState("");
+const [wordCheckResult, setWordCheckResult] = useState(null); // { exists, source, url, note? }
+const [wordCheckPreferAi, setWordCheckPreferAi] = useState(false);
+const wordCheckAbortRef = useRef(null);
 
+function openWordCheck() {
+  setWordCheckOpen(true);
+  setWordCheckWord("");
+  setWordCheckBusy(false);
+  setWordCheckError("");
+  setWordCheckResult(null);
+  setWordCheckPreferAi(false);
+}
+
+function closeWordCheck() {
+  setWordCheckOpen(false);
+  setWordCheckBusy(false);
+  setWordCheckError("");
+  setWordCheckResult(null);
+  if (wordCheckAbortRef.current) {
+    wordCheckAbortRef.current.abort();
+    wordCheckAbortRef.current = null;
+  }
+}
+
+async function runWordCheck() {
+  const w = normalizeWordForCheck(wordCheckWord);
+  if (!w) {
+    setWordCheckError("Voer een woord in.");
+    setWordCheckResult(null);
+    return;
+  }
+  if (!online) {
+    setWordCheckError("Je bent offline — woord check kan niet.");
+    setWordCheckResult(null);
+    return;
+  }
+
+  setWordCheckBusy(true);
+  setWordCheckError("");
+  setWordCheckResult(null);
+
+  if (wordCheckAbortRef.current) wordCheckAbortRef.current.abort();
+  const ctrl = new AbortController();
+  wordCheckAbortRef.current = ctrl;
+
+  try {
+    let res = null;
+
+    if (wordCheckPreferAi && WORDCHECK_AI_ENDPOINT) {
+      try {
+        res = await checkWordViaAiEndpoint(w, WORDCHECK_AI_ENDPOINT, ctrl.signal);
+      } catch {
+        res = null;
+      }
+    }
+
+    if (!res) {
+      res = await checkWordViaNlWiktionary(w, ctrl.signal);
+    }
+
+    setWordCheckResult(res);
+  } catch (e) {
+    if (e?.name !== "AbortError") {
+      setWordCheckError("Kon woord niet controleren (netwerk/API).");
+    }
+  } finally {
+    setWordCheckBusy(false);
+  }
+}
+
+function renderWordCheckOverlay() {
+  if (!wordCheckOpen) return null;
+
+  const requiredLetter = normalizeLetter(
+    offlineSolo ? offLastLetter :
+    offlineMulti ? offmLastLetter :
+    (isOnlineRoom && room?.started ? room?.lastLetter : "?")
+  );
+
+  const firstChar = normalizeLetter((normalizeWordForCheck(wordCheckWord) || "")[0] || "");
+  const hasReq = requiredLetter && requiredLetter !== "?";
+  const startsOk = hasReq && firstChar && firstChar === requiredLetter;
+
+  return (
+    <div className="overlay" onClick={closeWordCheck}>
+      <div className="card" onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Check woord</h2>
+
+        <p className="muted" style={{ marginTop: 0 }}>
+          Controleert of een woord bestaat via NL Wiktionary (gratis).
+          {WORDCHECK_AI_ENDPOINT ? " Optioneel: AI-check beschikbaar." : " (AI-check vereist een serverless endpoint.)"}
+        </p>
+
+        {hasReq && (
+          <div className="mini-hud" style={{ margin: "10px 0" }}>
+            <span className="badge">Huidige letter: <b>{requiredLetter}</b></span>
+            {wordCheckWord.trim() && (
+              <span className="badge">
+                Startletter: <b>{firstChar || "?"}</b> — {startsOk ? "✅ ok" : "❌ niet ok"}
+              </span>
+            )}
+          </div>
+        )}
+
+        <input
+          style={{ ...styles.input, width: "min(520px, 100%)" }}
+          placeholder="Typ een woord…"
+          value={wordCheckWord}
+          onChange={(e) => setWordCheckWord(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") runWordCheck();
+            if (e.key === "Escape") closeWordCheck();
+          }}
+          autoFocus
+        />
+
+        <Row>
+          <Button onClick={runWordCheck} disabled={wordCheckBusy || !online}>
+            {wordCheckBusy ? "Bezig…" : "Check"}
+          </Button>
+
+          <Button
+            variant="alt"
+            onClick={() => window.open(getGoogleMeaningUrl(wordCheckWord), "_blank", "noopener,noreferrer")}
+            disabled={!normalizeWordForCheck(wordCheckWord)}
+            title="Zoek betekenis op Google"
+          >
+            Zoek op Google
+          </Button>
+
+          {WORDCHECK_AI_ENDPOINT && (
+            <label className="badge" style={{ cursor: "pointer", userSelect: "none" }} title="Eerst AI proberen (valt terug op Wiktionary)">
+              <input
+                type="checkbox"
+                checked={wordCheckPreferAi}
+                onChange={(e) => setWordCheckPreferAi(e.target.checked)}
+                style={{ marginRight: 8 }}
+              />
+              AI eerst
+            </label>
+          )}
+
+          <Button variant="stop" onClick={closeWordCheck}>Sluiten</Button>
+        </Row>
+
+        {wordCheckError && (
+          <div className="badge" style={{ marginTop: 10, background: "rgba(239,68,68,0.18)", borderColor: "rgba(239,68,68,0.35)" }}>
+            {wordCheckError}
+          </div>
+        )}
+
+        {wordCheckResult && (
+          <div style={{ marginTop: 12, textAlign: "left" }}>
+            <div className="badge" style={{
+              background: wordCheckResult.exists ? "rgba(22,163,74,0.18)" : "rgba(239,68,68,0.18)",
+              borderColor: wordCheckResult.exists ? "rgba(22,163,74,0.35)" : "rgba(239,68,68,0.35)"
+            }}>
+              {wordCheckResult.exists ? "Bestaat (gevonden)" : "Niet gevonden"}
+              <span className="muted" style={{ marginLeft: 10 }}>bron: {wordCheckResult.source}</span>
+            </div>
+
+            {wordCheckResult.note && (
+              <div className="muted" style={{ marginTop: 8 }}>{wordCheckResult.note}</div>
+            )}
+
+            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <Button
+                variant="alt"
+                onClick={() => window.open(wordCheckResult.url, "_blank", "noopener,noreferrer")}
+              >
+                Open Wiktionary
+              </Button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 function renderOfflineMultiSetup() {
   if (!offmSetupOpen) return null;
 
@@ -1805,20 +2044,17 @@ const matchStartedAt = isOnlineRoom
     ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
     : 0;
 
-  function onLetterChanged(e) {
-    const val = normalizeLetter(e.target.value);
-    if (val.length === 1) {
-      if (room?.paused) { e.target.value = ""; return; }
-      if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
-        const required = normalizeLetter(room?.lastLetter);
-        if (required && required !== "?" && val === required) {
-          triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
-        }
-        submitLetterOnline(val);
-      }
-      e.target.value = "";
+function onLetterChanged(e) {
+  const val = normalizeLetter(e.target.value);
+  if (val.length === 1) {
+    if (room?.paused) { e.target.value = ""; return; }
+    if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
+      submitLetterOnline(val);
     }
+    e.target.value = "";
   }
+}
+
 
   useEffect(() => {
     if (isOnlineRoom && room?.started && isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused) {
@@ -2134,6 +2370,7 @@ function renderBottomScoreBar() {
                 {room.paused
                   ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
                   : <Button variant="alt" onClick={pauseGame}>⏸️ Pauzeer (iedereen)</Button>}
+                <Button variant="alt" onClick={openWordCheck}>Check woord</Button>
                 <Button onClick={changeLastLetter}>🔤 Verander letter</Button>
                 {room.paused && <span className="badge">⏸️ Gepauzeerd</span>}
                 {room?.lastAction?.type === "answer" && (
@@ -2599,6 +2836,7 @@ function renderBottomScoreBar() {
       {renderRoomBrowser()}
       {renderProfileOverlay()}
       {renderOfflineMultiSetup()}
+      {renderWordCheckOverlay()}
     </>
   );
 }
