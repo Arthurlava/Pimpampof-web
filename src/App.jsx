@@ -1912,22 +1912,28 @@ const matchStartedAt = isOnlineRoom
     const off = onValue(profRef, snap => setProfile(snap.val() || null));
     return () => off();
   }, [playerId]);
-function renderBottomScoreBar() {
-  // Offline multiplayer
-  if (offlineMulti && offmPlayers?.length) {
+\function renderBottomScoreBar() {
+  if (isOnlineRoom && room?.started && !room?.solo && room?.players) {
+    const ids = (Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
+      .filter((id) => room.players && room.players[id]);
+
+    if (!ids.length) return null;
+
     return (
       <div className="scorebar">
-        {offmPlayers.map((p, ix) => {
-          const score = offmScores?.[p.id] ?? 0;
-          const jail = offmJail?.[p.id] ?? 0;
-          const active = ix === offmTurnIx;
+        {ids.map((id) => {
+          const name = room.participants?.[id]?.name || room.players?.[id]?.name || "Speler";
+          const score = room.scores?.[id] ?? 0;
+          const jail = room.jail?.[id] ?? 0;
+          const active = room.turn === id;
+
           return (
             <div
-              key={p.id}
+              key={id}
               className={`scorechip${active ? " scorechip-active" : ""}`}
               title={jail > 0 ? `Jilla: ${jail}x` : ""}
             >
-              <b>{p.name}</b>
+              <b>{name}</b>
               <span>{score}</span>
               {jail > 0 ? <span>🔒x{jail}</span> : null}
             </div>
@@ -1936,6 +1942,10 @@ function renderBottomScoreBar() {
       </div>
     );
   }
+
+  return null;
+}
+
 
   // Online multiplayer (optioneel maar meestal gewenst als je “zoals online” bedoelt)
   if (isOnlineRoom && room?.started && !room?.solo && room?.players) {
@@ -2248,74 +2258,115 @@ function renderBottomScoreBar() {
           </Section>
         )}
 {offlineMulti && (
-  <Section>
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-      <div className="badge">Offline multiplayer</div>
+  <>
+    <Section>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div className="badge">Offline multiplayer</div>
 
-      {(() => {
-        const active = offmJillaLast && (Date.now() - (offmJillaLast.at || 0) < 2000);
-        return active ? (
-          <div className="jilla-toast">
-            <div className="jilla-bubble">🔒 {offmJillaLast.name} gebruikte Jilla!</div>
-          </div>
-        ) : null;
-      })()}
+        {(() => {
+          const active = offmJillaLast && (Date.now() - (offmJillaLast.at || 0) < 2000);
+          return active ? (
+            <div className="jilla-toast">
+              <div className="jilla-bubble">🔒 {offmJillaLast.name} gebruikte Jilla!</div>
+            </div>
+          ) : null;
+        })()}
 
-      <div className="badge">
-        Beurt: <b>{offmPlayers?.[offmTurnIx]?.name ?? "Speler"}</b>
-      </div>
-
-      {offmInCooldown ? (
         <div className="badge">
-          ⏳ Volgende beurt over {Math.ceil(offmCooldownLeftMs / 1000)}s
+          Beurt: <b>{offmPlayers?.[offmTurnIx]?.name ?? "Speler"}</b>
         </div>
-      ) : (
-        <Row>
-          <span className="badge">
-            ⏱️ Tijd: {Math.floor(offmElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
-          </span>
-          <span className="badge">
-            🏅 Punten als je nu antwoordt: <b>{offmPotentialPoints}</b>
-          </span>
-        </Row>
-      )}
 
-      <div style={{ fontSize: 18 }}>
-        Laatste letter: <span style={{ fontWeight: 700 }}>{offmLastLetter}</span>
-      </div>
+        {offmInCooldown ? (
+          <div className="badge">
+            ⏳ Volgende beurt over {Math.ceil(offmCooldownLeftMs / 1000)}s
+          </div>
+        ) : (
+          <Row>
+            <span className="badge">
+              ⏱️ Tijd: {Math.floor(offmElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+            </span>
+            <span className="badge">
+              🏅 Punten als je nu antwoordt: <b>{offmPotentialPoints}</b>
+            </span>
+          </Row>
+        )}
 
-      <div style={{ fontSize: 22, minHeight: "3rem" }}>
-        {offmInCooldown
-          ? "Wachten…"
-          : (() => {
-              const qs = getSeedQuestions();
-              const qIdx = offmOrder[offmIndex] ?? 0;
-              return qs[qIdx] ?? "Vraag komt hier...";
-            })()}
-      </div>
-
-      <input
-        ref={letterRef}
-        type="text"
-        inputMode="text"
-        maxLength={1}
-        onChange={onOfflineMultiLetterChanged}
-        placeholder={offmInCooldown ? "Wachten…" : "Typ de laatste letter…"}
-        disabled={offmInCooldown}
-        style={{
-          ...styles.letterInput,
-          opacity: offmInCooldown ? 0.5 : 1
-        }}
-      />
-
-      {!offmInCooldown && (
-        <div style={{ marginTop: 6 }}>
-          <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
+        <div style={{ fontSize: 18 }}>
+          Laatste letter: <span style={{ fontWeight: 700 }}>{offmLastLetter}</span>
         </div>
-      )}
-    </div>
-  </Section>
+
+        <div style={{ fontSize: 22, minHeight: "3rem" }}>
+          {offmInCooldown
+            ? "Wachten…"
+            : (() => {
+                const qs = getSeedQuestions();
+                const qIdx = offmOrder[offmIndex] ?? 0;
+                return qs[qIdx] ?? "Vraag komt hier...";
+              })()}
+        </div>
+
+        <input
+          ref={letterRef}
+          type="text"
+          inputMode="text"
+          maxLength={1}
+          onChange={onOfflineMultiLetterChanged}
+          placeholder={offmInCooldown ? "Wachten…" : "Typ de laatste letter…"}
+          disabled={offmInCooldown}
+          style={{
+            ...styles.letterInput,
+            opacity: offmInCooldown ? 0.5 : 1
+          }}
+        />
+
+        {!offmInCooldown && (
+          <div style={{ marginTop: 6 }}>
+            <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
+          </div>
+        )}
+      </div>
+    </Section>
+
+    <Section title="Spelers">
+      <ul style={styles.list}>
+        {offmPlayers.map((p, idx) => {
+          const score = offmScores?.[p.id] ?? 0;
+          const jail = offmJail?.[p.id] ?? 0;
+          const active = idx === offmTurnIx;
+          const hot = offmJillaLast?.id === p.id && (Date.now() - (offmJillaLast.at || 0) < 2000);
+
+          return (
+            <li
+              key={p.id}
+              className={hot ? "hot-jilla" : ""}
+              style={{
+                ...styles.li,
+                ...(active ? { background: "rgba(22,163,74,0.18)" } : {})
+              }}
+            >
+              <div style={styles.liText}>
+                {idx + 1}. {p.name}
+                <span className="badge" style={{ marginLeft: 6 }}>
+                  Punten: <b>{score}</b>
+                </span>
+                {jail > 0 && (
+                  <span className="badge" style={{ marginLeft: 6 }}>
+                    🔒 Jilla x{jail}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                {active ? <div>🟢 beurt</div> : <div style={{ opacity: 0.6 }}>—</div>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </Section>
+  </>
 )}
+
 
         {isOnlineRoom && room?.started && (
           <Section>
