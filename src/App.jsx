@@ -2417,7 +2417,6 @@ function renderBottomScoreBar() {
               <TextArea
                 value={invoer}
                 onChange={setInvoer}
-                placeholder={"Bijv: Wat is je lievelingsdier?,\nWat eet je graag?"}
               />
               <div style={{ marginTop: 12 }}>
                 <Row>
