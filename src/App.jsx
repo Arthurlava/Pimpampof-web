@@ -1912,7 +1912,7 @@ const matchStartedAt = isOnlineRoom
     const off = onValue(profRef, snap => setProfile(snap.val() || null));
     return () => off();
   }, [playerId]);
-\function renderBottomScoreBar() {
+function renderBottomScoreBar() {
   if (isOnlineRoom && room?.started && !room?.solo && room?.players) {
     const ids = (Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
       .filter((id) => room.players && room.players[id]);
