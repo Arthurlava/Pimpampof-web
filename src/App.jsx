@@ -1946,22 +1946,30 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
                 {onlineQuestion ?? "Vraag komt hier..."}
               </div>
 
-              {!room.solo && (
-                <>
-                  {inCooldown ? (
-                    <div className="badge">
-                      ⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s
-                    </div>
-                  {room.solo && (
-  <Row>
-    <span className="badge">
-      ⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
-    </span>
-    <span className="badge">
-      🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b>
-    </span>
-  </Row>
-)}
+              {room.solo ? (
+                <Row>
+                  <span className="badge">
+                    ⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+                  </span>
+                  <span className="badge">
+                    🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b>
+                  </span>
+                </Row>
+              ) : inCooldown ? (
+                <div className="badge">
+                  ⏳ Volgende ronde over {Math.ceil(cooldownLeftMs / 1000)}s
+                </div>
+              ) : (
+                <Row>
+                  <span className="badge">
+                    ⏱️ Tijd: {Math.floor(answerElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+                  </span>
+                  <span className="badge">
+                    🏅 Punten als je nu antwoordt: <b>{potentialPoints}</b>
+                  </span>
+                </Row>
+              )}
+
 
                   ) : (
                     <Row>
@@ -2070,12 +2078,16 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
         )}
 
         <footer style={styles.foot}>
-          {isOnlineRoom
-            room?.solo ? "Solo: timer & punten actief." : "Multiplayer: timer & punten actief (5s cooldown)."
-            : (offlineSolo
-              ? "Offline solo actief."
-              : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline)."))}
-        </footer>
+  {isOnlineRoom
+    ? (room?.solo
+        ? "Solo: timer & punten actief."
+        : "Multiplayer: timer & punten actief (5s cooldown).")
+    : (offlineSolo
+        ? "Offline solo actief."
+        : (online
+            ? "Maak een room of start Solo (offline)."
+            : "Offline — start Solo (offline)."))}
+</footer>
       </div>
 
       {pofShow && (
