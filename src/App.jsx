@@ -550,78 +550,65 @@ function offlineJilla() {
   }, [roomCode, playerId]);
 
   /* room listeners + self-heal */
-  function computeHealInfo(data) {
-    const players = data.players ? Object.keys(data.players) : [];
-    const presence = (data.presence && typeof data.presence === "object") ? data.presence : {};
-    const offline = players.filter(pid => {
-      const conns = presence[pid];
-      // hier gebruiken we het model: als er een presence-object is maar 0 keys, is hij "bewust offline"
-      return conns && typeof conns === "object" && Object.keys(conns).length === 0;
-    });
+ function computeHealInfo(data) {
+  const players = data.players ? Object.keys(data.players) : [];
+  const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
+  const orderFiltered = order.filter((id) => players.includes(id));
 
-    const order = Array.isArray(data.playersOrder) ? data.playersOrder : players;
-    const orderFiltered = order.filter(id => players.includes(id));
-    const hostOk = data.hostId && players.includes(data.hostId);
-    const turnOk = data.turn && players.includes(data.turn);
+  const hostOk = data.hostId && players.includes(data.hostId);
+  const turnOk = data.turn && players.includes(data.turn);
 
-    const mustHeal =
-      offline.length > 0 ||
-      orderFiltered.length !== order.length ||
-      !hostOk || !turnOk ||
-      players.length === 0;
+  const mustHeal =
+    players.length === 0 ||
+    orderFiltered.length !== order.length ||
+    !hostOk ||
+    !turnOk;
 
-    return { offline, mustHeal };
+  return { mustHeal };
+}
+
+function attachRoomListener(code) {
+  if (roomUnsubRef.current) {
+    roomUnsubRef.current();
+    roomUnsubRef.current = null;
   }
 
-  function attachRoomListener(code) {
-    // clean old listener
-    if (roomUnsubRef.current) { roomUnsubRef.current(); roomUnsubRef.current = null; }
+  const r = ref(db, `rooms/${code}`);
+  const unsub = onValue(r, (snap) => {
+    const data = snap.val() ?? null;
+    setRoom(data);
+    setIsHost(!!data && data.hostId === playerId);
+    if (!data) return;
 
-    const r = ref(db, `rooms/${code}`);
-    const unsub = onValue(r, (snap) => {
-      const data = snap.val() ?? null;
-      setRoom(data);
-      setIsHost(!!data && data.hostId === playerId);
-      if (!data) return;
+    const { mustHeal } = computeHealInfo(data);
+    if (!mustHeal) return;
 
-      const { offline, mustHeal } = computeHealInfo(data);
-      if (!mustHeal) return;
+    runTransaction(r, (d) => {
+      if (!d) return d;
 
-      runTransaction(r, (d) => {
-        if (!d) return d;
+      const ids = d.players ? Object.keys(d.players) : [];
+      if (ids.length === 0) return null;
 
-        if (d.players && d.presence) {
-          for (const id of offline) {
-            if (canLeaveRoom(d)) {
-              delete d.players[id];
-              if (d.jail && d.jail[id] != null) delete d.jail[id];
-            }
-          }
+      d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter((id) => ids.includes(id));
+      if (d.playersOrder.length === 0) d.playersOrder = ids;
+
+      if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
+      if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
+
+      if (d.jail) {
+        for (const jid of Object.keys(d.jail)) {
+          if (!d.players[jid]) delete d.jail[jid];
         }
+      }
 
-        const ids = d.players ? Object.keys(d.players) : [];
-        if (ids.length === 0) return null;
-
-        d.playersOrder = (Array.isArray(d.playersOrder) ? d.playersOrder : ids).filter(id => ids.includes(id));
-        if (d.playersOrder.length === 0) d.playersOrder = ids;
-
-        if (!d.hostId || !ids.includes(d.hostId)) d.hostId = d.playersOrder[0] || ids[0];
-        if (!d.turn || !ids.includes(d.turn)) d.turn = d.playersOrder[0] || d.hostId;
-
-        if (d.jail) {
-          for (const jid of Object.keys(d.jail)) {
-            if (!d.players[jid]) delete d.jail[jid];
-          }
-        }
-
-        // self-heal is ook activiteit
-        d.lastActivityAt = Date.now();
-        return d;
-      });
+      d.lastActivityAt = Date.now();
+      return d;
     });
+  });
 
-    roomUnsubRef.current = unsub;
-  }
+  roomUnsubRef.current = unsub;
+}
+
 
   function getSeedQuestions() {
     return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
@@ -983,31 +970,32 @@ function offlineJilla() {
   }
 
   function advanceTurnWithJail(data) {
-    const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
-      .filter((id) => data.players && data.players[id]);
-    if (ids.length === 0) return null;
+  const ids = (Array.isArray(data.playersOrder) ? data.playersOrder : Object.keys(data.players || {}))
+    .filter((id) => data.players && data.players[id]);
+  if (ids.length === 0) return null;
 
-    if (!data.jail) data.jail = {};
-    let idx = Math.max(0, ids.indexOf(data.turn));
+  if (!data.jail) data.jail = {};
 
-    for (let tries = 0; tries < ids.length; tries++) {
-      idx = (idx + 1) % ids.length;
-      const cand = ids[idx];
+  let idx = Math.max(0, ids.indexOf(data.turn));
 
-      if (!hasPresence(data, cand)) continue;
+  for (let tries = 0; tries < ids.length; tries++) {
+    idx = (idx + 1) % ids.length;
+    const cand = ids[idx];
 
-      const j = data.jail[cand] || 0;
-      if (j > 0) {
-        data.jail[cand] = j - 1;
-        continue;
-      }
-
-      data.turn = cand;
-      return cand;
+    const j = data.jail[cand] || 0;
+    if (j > 0) {
+      data.jail[cand] = j - 1;
+      continue;
     }
-    data.turn = ids[(ids.indexOf(data.turn) + 1) % ids.length];
-    return data.turn;
+
+    data.turn = cand;
+    return cand;
   }
+
+  data.turn = ids[(Math.max(0, ids.indexOf(data.turn)) + 1) % ids.length];
+  return data.turn;
+}
+
 
   async function cancelLastAnswer() {
     if (!roomCode || !room || !room.started) return;
@@ -1438,32 +1426,7 @@ async function submitLetterOnline(letter) {
     }
   }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
-  /* watchdog: skip offline beurt */
-  useEffect(() => {
-    if (!roomCode || !room) return;
-    if (room.solo || room.paused) return;
-    if (room.phase !== "answer") return;
-
-    const currentTurn = room.turn;
-    if (!currentTurn) return;
-
-    if (!hasPresence(room, currentTurn)) {
-      runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
-        if (!data || data.solo || data.paused) return data;
-        if (data.phase !== "answer") return data;
-        if (!data.turn || hasPresence(data, data.turn)) return data;
-
-        advanceTurnWithJail(data);
-        data.phase = "cooldown";
-        data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-        data.turnStartAt = null;
-        data.lastEvent = { type: "auto_skip_offline", by: data.turn, at: Date.now() };
-        data.lastActivityAt = Date.now();
-        return data;
-      });
-    }
-  }, [roomCode, room?.turn, room?.phase, room?.paused, room]);
-
+ 
   /* UI helpers voor render */
   const isOnlineRoom = !!roomCode;
   const isMyTurn = isOnlineRoom && room?.turn === playerId;
