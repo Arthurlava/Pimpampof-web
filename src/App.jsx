@@ -477,6 +477,267 @@ function offlineJilla() {
 
   triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
 }
+// OFFLINE MULTIPLAYER (cooldown = doorgeef-moment; geen apart scherm)
+const [offlineMulti, setOfflineMulti] = useState(false);
+const [offmSetupOpen, setOffmSetupOpen] = useState(false);
+const [offmPlayerCount, setOffmPlayerCount] = useState(2);
+const [offmNames, setOffmNames] = useState(() => [playerName || "", ""]);
+
+const [offmPlayers, setOffmPlayers] = useState([]); // [{ id, name }]
+const [offmOrder, setOffmOrder] = useState([]);
+const [offmIndex, setOffmIndex] = useState(-1);
+const [offmLastLetter, setOffmLastLetter] = useState("?");
+const [offmPhase, setOffmPhase] = useState("answer"); // "answer" | "cooldown"
+const [offmTurnIx, setOffmTurnIx] = useState(0);
+const [offmTurnStartAt, setOffmTurnStartAt] = useState(null);
+const [offmCooldownEndAt, setOffmCooldownEndAt] = useState(null);
+const [offmStartedAt, setOffmStartedAt] = useState(null);
+
+const [offmScores, setOffmScores] = useState({});
+const [offmStats, setOffmStats] = useState({});
+const [offmJail, setOffmJail] = useState({});
+const [offmJillaLast, setOffmJillaLast] = useState(null);
+
+function clampInt(n, min, max) {
+  const x = Number.isFinite(n) ? Math.trunc(n) : min;
+  return Math.max(min, Math.min(max, x));
+}
+
+function openOfflineMultiSetup() {
+  if (offlineSolo || offlineMulti) return;
+  if (roomCode) return; // niet tegelijk met online room
+  setOffmPlayerCount(2);
+  setOffmNames([playerName || "", ""]);
+  setOffmSetupOpen(true);
+}
+
+function stopOfflineMulti() {
+  setOfflineMulti(false);
+  setOffmSetupOpen(false);
+  setOffmPlayers([]);
+  setOffmOrder([]);
+  setOffmIndex(-1);
+  setOffmLastLetter("?");
+  setOffmPhase("answer");
+  setOffmTurnIx(0);
+  setOffmTurnStartAt(null);
+  setOffmCooldownEndAt(null);
+  setOffmStartedAt(null);
+  setOffmScores({});
+  setOffmStats({});
+  setOffmJail({});
+  setOffmJillaLast(null);
+}
+
+function computeNextTurnIxWithJail(players, currentIx, jailMap) {
+  const len = players.length;
+  if (len <= 1) return { nextIx: 0, nextJail: { ...(jailMap || {}) } };
+
+  const nextJail = { ...(jailMap || {}) };
+  let idx = clampInt(currentIx, 0, len - 1);
+
+  for (let tries = 0; tries < len; tries++) {
+    idx = (idx + 1) % len;
+    const pid = players[idx].id;
+    const j = nextJail[pid] || 0;
+    if (j > 0) {
+      nextJail[pid] = j - 1;
+      continue;
+    }
+    return { nextIx: idx, nextJail };
+  }
+
+  return { nextIx: (currentIx + 1) % len, nextJail };
+}
+
+function startOfflineMultiFromSetup() {
+  const n = clampInt(offmPlayerCount, 2, 8);
+  const rawNames = (offmNames || []).slice(0, n).map(s => String(s || "").trim());
+  const names = rawNames.map((nm, i) => nm || `Speler ${i + 1}`);
+  const players = names.map(name => ({ id: crypto.randomUUID(), name }));
+
+  const qs = getSeedQuestions();
+  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+
+  const initScores = {};
+  const initStats = {};
+  for (const p of players) {
+    initScores[p.id] = 0;
+    initStats[p.id] = { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+  }
+
+  const t = Date.now();
+
+  setOfflineMulti(true);
+  setOffmPlayers(players);
+  setOffmScores(initScores);
+  setOffmStats(initStats);
+  setOffmJail({});
+
+  setOffmOrder(shuffle([...Array(qs.length).keys()]));
+  setOffmIndex(0);
+
+  setOffmLastLetter(randomStartConsonant());
+  setOffmTurnIx(0);
+
+  setOffmPhase("answer");
+  setOffmTurnStartAt(t);
+  setOffmCooldownEndAt(null);
+  setOffmStartedAt(t);
+
+  setOffmJillaLast(null);
+  setOffmSetupOpen(false);
+
+  setTimeout(() => letterRef.current?.focus(), 0);
+}
+
+function beginOffmCooldown() {
+  setOffmPhase("cooldown");
+  setOffmCooldownEndAt(Date.now() + COOLDOWN_MS);
+  setOffmTurnStartAt(null);
+}
+
+function onOfflineMultiLetterChanged(e) {
+  const val = normalizeLetter(e.target.value);
+  if (val.length !== 1) return;
+
+  if (!offlineMulti || offmPhase !== "answer") { e.target.value = ""; return; }
+  if (!offmPlayers.length || !offmOrder.length) { e.target.value = ""; return; }
+
+  const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
+  const nowTs = Date.now();
+  const elapsed = Math.max(0, nowTs - (offmTurnStartAt ?? nowTs));
+
+  const required = normalizeLetter(offmLastLetter);
+  const isDouble = required && required !== "?" && val === required;
+  const basePoints = calcPoints(elapsed);
+  const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
+  const gain = basePoints + bonus;
+
+  setOffmScores(s => ({ ...s, [cur.id]: (s[cur.id] || 0) + gain }));
+  setOffmStats(st => {
+    const prev = st[cur.id] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+    return {
+      ...st,
+      [cur.id]: {
+        totalTimeMs: prev.totalTimeMs + elapsed,
+        answeredCount: prev.answeredCount + 1,
+        jillaCount: prev.jillaCount || 0,
+        doubleCount: (prev.doubleCount || 0) + (isDouble ? 1 : 0)
+      }
+    };
+  });
+
+  setOffmLastLetter(val);
+  setOffmIndex(i => (i + 1) % (offmOrder.length || 1));
+
+  const { nextIx, nextJail } = computeNextTurnIxWithJail(offmPlayers, offmTurnIx, offmJail);
+  setOffmJail(nextJail);
+  setOffmTurnIx(nextIx);
+
+  beginOffmCooldown();
+
+  if (isDouble) triggerPof(`Dubble pof! +${DOUBLE_POF_BONUS}`);
+  if (gain > 0) {
+    triggerScoreToast(
+      `+${gain} punten${isDouble ? ` (incl. +${DOUBLE_POF_BONUS} bonus)` : ""}`,
+      "plus"
+    );
+  }
+
+  e.target.value = "";
+}
+
+function offlineMultiJilla() {
+  if (!offlineMulti || offmPhase !== "answer") return;
+  if (!offmPlayers.length || !offmOrder.length) return;
+
+  const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
+
+  setOffmScores(s => ({ ...s, [cur.id]: (s[cur.id] || 0) - JILLA_PENALTY }));
+  setOffmStats(st => {
+    const prev = st[cur.id] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+    return {
+      ...st,
+      [cur.id]: {
+        totalTimeMs: prev.totalTimeMs || 0,
+        answeredCount: prev.answeredCount || 0,
+        jillaCount: (prev.jillaCount || 0) + 1,
+        doubleCount: prev.doubleCount || 0
+      }
+    };
+  });
+
+  const jailNext = { ...(offmJail || {}) };
+  jailNext[cur.id] = (jailNext[cur.id] || 0) + 1;
+
+  const { nextIx, nextJail } = computeNextTurnIxWithJail(offmPlayers, offmTurnIx, jailNext);
+  setOffmJail(nextJail);
+  setOffmTurnIx(nextIx);
+
+  setOffmIndex(i => (i + 1) % (offmOrder.length || 1));
+
+  setOffmJillaLast({ id: cur.id, name: cur.name, at: Date.now() });
+  beginOffmCooldown();
+
+  triggerScoreToast(`-${JILLA_PENALTY} punten (Jilla)`, "minus");
+}
+
+function renderOfflineMultiSetup() {
+  if (!offmSetupOpen) return null;
+  const n = clampInt(offmPlayerCount, 2, 8);
+  return (
+    <div className="overlay" onClick={() => setOffmSetupOpen(false)}>
+      <div className="card" onClick={(e) => e.stopPropagation()}>
+        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Offline multiplayer</h2>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Cooldown tussen beurten is het doorgeef-moment.
+        </p>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
+          <span className="badge">Spelers</span>
+          <select
+            value={n}
+            onChange={(e) => {
+              const next = clampInt(parseInt(e.target.value, 10), 2, 8);
+              setOffmPlayerCount(next);
+              setOffmNames(prev => Array.from({ length: next }, (_, i) => String(prev?.[i] ?? "")));
+            }}
+            style={{ ...styles.input, width: 120 }}
+          >
+            {Array.from({ length: 7 }, (_, i) => i + 2).map(x => (
+              <option key={x} value={x}>{x}</option>
+            ))}
+          </select>
+        </div>
+
+        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+          {Array.from({ length: n }, (_, i) => (
+            <input
+              key={i}
+              style={styles.input}
+              placeholder={`Naam speler ${i + 1}`}
+              value={offmNames?.[i] ?? ""}
+              onChange={(e) => {
+                const v = e.target.value;
+                setOffmNames(prev => {
+                  const arr = Array.from({ length: n }, (_, ix) => String(prev?.[ix] ?? ""));
+                  arr[i] = v;
+                  return arr;
+                });
+              }}
+            />
+          ))}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
+          <Button variant="alt" onClick={() => setOffmSetupOpen(false)}>Annuleren</Button>
+          <Button onClick={startOfflineMultiFromSetup}>Start offline multiplayer</Button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
   // ONLINE
   const [roomCodeInput, setRoomCodeInput] = useState("");
@@ -1426,7 +1687,20 @@ async function submitLetterOnline(letter) {
     }
   }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
- 
+ useEffect(() => {
+  if (!offlineMulti) return;
+  if (offmPhase !== "cooldown") return;
+  if (!offmCooldownEndAt) return;
+
+  if (now >= offmCooldownEndAt) {
+    setOffmPhase("answer");
+    const t = Date.now();
+    setOffmTurnStartAt(t);
+    setOffmCooldownEndAt(null);
+    setTimeout(() => letterRef.current?.focus(), 0);
+  }
+}, [offlineMulti, offmPhase, offmCooldownEndAt, now]);
+
   /* UI helpers voor render */
   const isOnlineRoom = !!roomCode;
   const isMyTurn = isOnlineRoom && room?.turn === playerId;
@@ -1444,6 +1718,11 @@ const potentialPoints = calcPoints(answerElapsedMs);
 
 const offElapsedMs = (offlineSolo && offTurnStartAt) ? Math.max(0, now - offTurnStartAt) : 0;
 const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
+const offmInCooldown = offlineMulti && offmPhase === "cooldown";
+const offmCooldownLeftMs = Math.max(0, (offmCooldownEndAt || 0) - now);
+const offmElapsedMs = (offlineMulti && offmPhase === "answer" && offmTurnStartAt)
+  ? Math.max(0, now - offmTurnStartAt) : 0;
+const offmPotentialPoints = offlineMulti ? calcPoints(offmElapsedMs) : 0;
 
 
   const roundSize = (isOnlineRoom && room?.started)
@@ -1455,13 +1734,17 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
     )
     : 1;
 
-  const currentRound = isOnlineRoom
-    ? (1 + Math.floor((room?.currentIndex ?? 0) / roundSize))
-    : (offlineSolo ? (1 + Math.floor(Math.max(0, offIndex) / 1)) : 0);
+const currentRound = isOnlineRoom
+  ? (1 + Math.floor((room?.currentIndex ?? 0) / roundSize))
+  : (offlineMulti
+    ? (1 + Math.floor(Math.max(0, offmIndex) / Math.max(1, offmPlayers.length || 1)))
+    : (offlineSolo ? (1 + Math.floor(Math.max(0, offIndex) / 1)) : 0));
 
-  const matchStartedAt = isOnlineRoom
-    ? (room?.startedAt || room?.createdAt || null)
-    : (offlineSolo ? offStartedAt : null);
+
+const matchStartedAt = isOnlineRoom
+  ? (room?.startedAt || room?.createdAt || null)
+  : (offlineMulti ? offmStartedAt : (offlineSolo ? offStartedAt : null));
+
   const matchDurationMs = matchStartedAt
     ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
     : 0;
@@ -1675,7 +1958,7 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
           <h1 style={styles.h1}>PimPamPof</h1>
 
           <Row>
-            {!room?.started && !offlineSolo && (
+            {!room?.started && !offlineSolo && !offlineMulti && (
               <input
                 style={styles.input}
                 placeholder="Jouw naam"
@@ -1684,7 +1967,7 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
               />
             )}
 
-            {!isOnlineRoom && !offlineSolo && (
+            {!isOnlineRoom && !offlineSolo && !offlineMulti && (
               <>
                 {!online ? (
                   <>
@@ -1705,6 +1988,7 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
                     />
                     <Button variant="alt" onClick={joinRoom}>Join</Button>
                     <Button onClick={startOffline}>Solo (offline)</Button>
+                    <Button onClick={openOfflineMultiSetup}>Offline multiplayer</Button>
                     <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">
                       ↔️ Naar Dierenspel
                     </Button>
@@ -1715,6 +1999,9 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
 
             {offlineSolo && (
               <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
+            )}
+            {offlineMulti && (
+              <Button variant="stop" onClick={stopOfflineMulti}>Stop offline multiplayer</Button>
             )}
 
             {isOnlineRoom && (
@@ -1769,16 +2056,14 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
 
             {!online && !offlineSolo && <span className="muted">start Solo</span>}
           </Row>
-
-          {(offlineSolo || (isOnlineRoom && room?.started)) && (
+          {(offlineSolo || offlineMulti || (isOnlineRoom && room?.started)) && (
             <div className="mini-hud" style={{ marginTop: 6 }}>
               <span className="badge">🧭 Ronde: <b>{currentRound}</b></span>
               <span className="badge">⏳ Duur <b>{fmtDuration(matchDurationMs)}</b></span>
             </div>
           )}
         </header>
-
-        {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && (
+          {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
           <>
             <Section title="Nieuwe vragen (gescheiden met , of enter)">
               <TextArea
@@ -1864,6 +2149,92 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
             </div>
           </Section>
         )}
+{offlineMulti && (
+  <Section>
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+      <div className="badge">Offline multiplayer</div>
+
+      <Row>
+        {offmPlayers.map((p, ix) => {
+          const score = offmScores?.[p.id] ?? 0;
+          const jail = offmJail?.[p.id] ?? 0;
+          const active = ix === offmTurnIx;
+          return (
+            <span
+              key={p.id}
+              className="badge"
+              style={active ? { background: "rgba(22,163,74,0.18)" } : undefined}
+            >
+              <b>{p.name}</b>: {score}{jail > 0 ? ` 🔒x${jail}` : ""}
+            </span>
+          );
+        })}
+      </Row>
+
+      {(() => {
+        const active = offmJillaLast && (Date.now() - (offmJillaLast.at || 0) < 2000);
+        return active ? (
+          <div className="jilla-toast">
+            <div className="jilla-bubble">🔒 {offmJillaLast.name} gebruikte Jilla!</div>
+          </div>
+        ) : null;
+      })()}
+
+      <div className="badge">
+        Beurt: <b>{offmPlayers?.[offmTurnIx]?.name ?? "Speler"}</b>
+      </div>
+
+      {offmInCooldown ? (
+        <div className="badge">
+          ⏳ Volgende beurt over {Math.ceil(offmCooldownLeftMs / 1000)}s
+        </div>
+      ) : (
+        <Row>
+          <span className="badge">
+            ⏱️ Tijd: {Math.floor(offmElapsedMs / 1000)}s / {Math.floor(MAX_TIME_MS / 1000)}s
+          </span>
+          <span className="badge">
+            🏅 Punten als je nu antwoordt: <b>{offmPotentialPoints}</b>
+          </span>
+        </Row>
+      )}
+
+      <div style={{ fontSize: 18 }}>
+        Laatste letter: <span style={{ fontWeight: 700 }}>{offmLastLetter}</span>
+      </div>
+
+      <div style={{ fontSize: 22, minHeight: "3rem" }}>
+        {offmInCooldown
+          ? "Wachten…"
+          : (() => {
+              const qs = getSeedQuestions();
+              const qIdx = offmOrder[offmIndex] ?? 0;
+              return qs[qIdx] ?? "Vraag komt hier...";
+            })()}
+      </div>
+
+      <input
+        ref={letterRef}
+        type="text"
+        inputMode="text"
+        maxLength={1}
+        onChange={onOfflineMultiLetterChanged}
+        placeholder={offmInCooldown ? "Wachten…" : "Typ de laatste letter…"}
+        disabled={offmInCooldown}
+        style={{
+          ...styles.letterInput,
+          opacity: offmInCooldown ? 0.5 : 1
+        }}
+      />
+
+      {!offmInCooldown && (
+        <div style={{ marginTop: 6 }}>
+          <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
+        </div>
+      )}
+    </div>
+  </Section>
+)}
 
         {isOnlineRoom && room?.started && (
           <Section>
@@ -2032,11 +2403,11 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
   ? (room?.solo
     ? "Solo: timer & punten actief."
     : "Multiplayer: timer & punten actief (5s cooldown).")
-  : (offlineSolo
-    ? "Offline solo actief."
-    : (online
-      ? "Maak een room of start Solo (offline)."
-      : "Offline — start Solo (offline)."))}
+: (offlineSolo
+  ? "Offline solo actief."
+  : (offlineMulti
+    ? "Offline multiplayer actief (5s cooldown)."
+    : (online ? "Maak een room of start Solo (offline)." : "Offline — start Solo (offline).")))
 
 </footer>
       </div>
@@ -2092,6 +2463,7 @@ const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
 
       {renderRoomBrowser()}
       {renderProfileOverlay()}
+      {renderOfflineMultiSetup()}
     </>
   );
 }
