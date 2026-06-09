@@ -68,6 +68,7 @@ import {
   normalizeComboLetter,
   normalizeComboQuestion,
 } from "./utils/impossibleCombos";
+import { TutorialOverlay } from "./components/settings/TutorialOverlay";
 
 /* ---------- App ---------- */
 export default function PimPamPofWeb() {
@@ -108,6 +109,7 @@ export default function PimPamPofWeb() {
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
   const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
+  const [tutorialOpen, setTutorialOpen] = useState(false);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -1794,6 +1796,7 @@ const matchStartedAt = isOnlineRoom
     leaderOpen ||
     settingsOpen ||
     roomBrowserOpen ||
+    tutorialOpen ||
     profileOpen ||
     reportReviewOpen ||
     !!reportDialog ||
@@ -2415,13 +2418,21 @@ function onLetterChanged(e) {
       <SettingsOverlay
         open={settingsOpen}
         theme={theme}
-        reportCount={pendingReports.length}
+        reportCount={pendingImpossibleComboReports.length}
         onThemeChange={setTheme}
         onOpenReports={() => {
           setSettingsOpen(false);
-          setReportReviewOpen(true);
+          setReportsOpen(true);
+        }}
+        onOpenTutorial={() => {
+          setSettingsOpen(false);
+          setTutorialOpen(true);
         }}
         onClose={() => setSettingsOpen(false)}
+      />
+      <TutorialOverlay
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
       />
       <RoomBrowser
         open={roomBrowserOpen}

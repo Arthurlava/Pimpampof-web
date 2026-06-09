@@ -85,7 +85,7 @@ export function MainMenuPanel({
 
         <MenuCard
           title="Dierenspel"
-          text="Open het andere spel in dezelfde stijl."
+          text="Open het andere spel in dezelfde stijl, alleen dan met een vaste vraag: Noem een dier dat bignt met de letter waar het vorige dier op eindigde."
           badge="Extra"
         >
           <Button onClick={onOpenDieren}>Naar Dierenspel</Button>
