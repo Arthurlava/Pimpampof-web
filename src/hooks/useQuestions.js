@@ -174,11 +174,18 @@ export function useQuestions() {
   }
 
   async function kopieerAlle() {
-    const tekst = vragen.map((vraag) => vraag.tekst).join(",\n");
+    const vragenOmTeKopieren = visibleQuestions;
+    const tekst = vragenOmTeKopieren.map((vraag) => vraag.tekst).join(",\n");
+    const label = selectedCategory === ALL_CATEGORIES ? "Alle vragen" : `Vragen uit ${selectedCategory}`;
+
+    if (!vragenOmTeKopieren.length) {
+      alert("Er zijn geen vragen om te kopiëren.");
+      return;
+    }
 
     try {
       await navigator.clipboard.writeText(tekst);
-      alert("Alle vragen zijn gekopieerd.");
+      alert(`${label} zijn gekopieerd.`);
     } catch {
       const textarea = document.createElement("textarea");
       textarea.value = tekst;
@@ -186,7 +193,7 @@ export function useQuestions() {
       textarea.select();
       document.execCommand("copy");
       document.body.removeChild(textarea);
-      alert("Alle vragen zijn gekopieerd.");
+      alert(`${label} zijn gekopieerd.`);
     }
   }
 

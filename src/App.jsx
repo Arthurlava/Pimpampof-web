@@ -1637,14 +1637,6 @@ function onLetterChanged(e) {
             </div>
           )}
         </header>
-        {!offlineSolo && !offlineMulti && !room?.started && (
-          <WhatsNewPanel
-            whatsNew={WHATS_NEW}
-            isOpen={whatsOpen}
-            onToggle={() => setWhatsOpen((open) => !open)}
-          />
-        )}
-
         {!isOnlineRoom && !offlineSolo && !offlineMulti && (
           <MainMenuPanel
             online={online}
@@ -1656,6 +1648,14 @@ function onLetterChanged(e) {
             onStartSolo={startOffline}
             onStartOfflineMulti={openOfflineMultiSetup}
             onOpenDieren={() => (window.location.href = URL_DIEREN)}
+          />
+        )}
+
+        {!offlineSolo && !offlineMulti && !room?.started && (
+          <WhatsNewPanel
+            whatsNew={WHATS_NEW}
+            isOpen={whatsOpen}
+            onToggle={() => setWhatsOpen((open) => !open)}
           />
         )}
 
