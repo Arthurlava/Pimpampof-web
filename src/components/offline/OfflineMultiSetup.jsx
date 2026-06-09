@@ -1,16 +1,35 @@
+import { useEffect, useState } from "react";
 import { Button } from "../common/Button";
 import { OFFLINE_MULTI_MAX_PLAYERS } from "../../config/constants";
 import { clampInt } from "../../utils/gameUtils";
 import { styles } from "../../styles/styles";
 
-export function OfflineMultiSetup({ open, playerCount, names, onPlayerCountChange, onNamesChange, onStart, onClose }) {
+export function OfflineMultiSetup({
+  open,
+  playerCount,
+  names,
+  onPlayerCountChange,
+  onNamesChange,
+  onStart,
+  onClose,
+}) {
+  const [countInput, setCountInput] = useState(String(playerCount ?? 2));
+
+  useEffect(() => {
+    if (open) {
+      setCountInput(String(playerCount ?? 2));
+    }
+  }, [open, playerCount]);
+
   if (!open) return null;
 
   const count = clampInt(playerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
 
-  function updatePlayerCount(value) {
+  function applyPlayerCount(value) {
     const parsed = parseInt(value, 10);
     const next = clampInt(parsed, 2, OFFLINE_MULTI_MAX_PLAYERS);
+
+    setCountInput(String(next));
     onPlayerCountChange(next);
     onNamesChange(Array.from({ length: next }, (_, index) => String(names?.[index] ?? "")));
   }
@@ -19,6 +38,11 @@ export function OfflineMultiSetup({ open, playerCount, names, onPlayerCountChang
     const next = Array.from({ length: count }, (_, ix) => String(names?.[ix] ?? ""));
     next[index] = value;
     onNamesChange(next);
+  }
+
+  function startGame() {
+    applyPlayerCount(countInput);
+    onStart();
   }
 
   return (
@@ -31,15 +55,18 @@ export function OfflineMultiSetup({ open, playerCount, names, onPlayerCountChang
 
         <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
           <span className="badge">Spelers</span>
+
           <input
             type="number"
             min={2}
             max={OFFLINE_MULTI_MAX_PLAYERS}
             step={1}
-            value={count}
-            onChange={(event) => updatePlayerCount(event.target.value)}
+            value={countInput}
+            onChange={(event) => setCountInput(event.target.value)}
+            onBlur={() => applyPlayerCount(countInput)}
             style={{ ...styles.input, width: 120 }}
           />
+
           <span className="muted">min 2, max {OFFLINE_MULTI_MAX_PLAYERS}</span>
         </div>
 
@@ -57,7 +84,7 @@ export function OfflineMultiSetup({ open, playerCount, names, onPlayerCountChang
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
           <Button variant="alt" onClick={onClose}>Annuleren</Button>
-          <Button onClick={onStart}>Start offline multiplayer</Button>
+          <Button onClick={startGame}>Start offline multiplayer</Button>
         </div>
       </div>
     </div>
