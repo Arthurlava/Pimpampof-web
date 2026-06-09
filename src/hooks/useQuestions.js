@@ -3,12 +3,11 @@ import { DEFAULT_VRAGEN } from "../data/defaultQuestions";
 import { OLD_KEYS, STORAGE_KEY } from "../config/constants";
 import { createId, splitInput } from "../utils/gameUtils";
 
-const DEFAULT_CATEGORY = "Algemeen";
 const ALL_CATEGORIES = "Alles";
+const CATEGORY_STORAGE_KEY = "ppp.vragen.categories.v1";
 
 function cleanCategory(value) {
-  const category = String(value || "").trim();
-  return category || DEFAULT_CATEGORY;
+  return String(value || "").trim();
 }
 
 function normalizeQuestion(question) {
@@ -25,7 +24,7 @@ function createDefaultQuestions() {
     id: createId(),
     tekst: String(tekst),
     active: true,
-    category: DEFAULT_CATEGORY,
+    category: "",
   }));
 }
 
@@ -61,11 +60,23 @@ function loadStoredQuestions() {
   }
 }
 
+function loadStoredCategories() {
+  try {
+    const raw = localStorage.getItem(CATEGORY_STORAGE_KEY);
+    const parsed = JSON.parse(raw || "[]");
+    if (!Array.isArray(parsed)) return [];
+    return [...new Set(parsed.map(cleanCategory).filter(Boolean))];
+  } catch {
+    return [];
+  }
+}
+
 export function useQuestions() {
   const [vragen, setVragen] = useState(loadStoredQuestions);
+  const [customCategories, setCustomCategories] = useState(loadStoredCategories);
   const [invoer, setInvoer] = useState("");
   const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
-  const [newQuestionCategory, setNewQuestionCategory] = useState(DEFAULT_CATEGORY);
+  const [newQuestionCategory, setNewQuestionCategory] = useState("");
   const [newCategoryName, setNewCategoryName] = useState("");
 
   useEffect(() => {
@@ -76,11 +87,22 @@ export function useQuestions() {
     }
   }, [vragen]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify(customCategories));
+    } catch (err) {
+      console.warn("Kon categorieën niet opslaan in localStorage", err);
+    }
+  }, [customCategories]);
+
   const categories = useMemo(() => {
-    const names = new Set([DEFAULT_CATEGORY]);
-    vragen.forEach((question) => names.add(cleanCategory(question.category)));
+    const names = new Set(customCategories);
+    vragen.forEach((question) => {
+      const category = cleanCategory(question.category);
+      if (category) names.add(category);
+    });
     return [ALL_CATEGORIES, ...Array.from(names).sort((a, b) => a.localeCompare(b))];
-  }, [vragen]);
+  }, [customCategories, vragen]);
 
   const visibleQuestions = useMemo(() => {
     if (selectedCategory === ALL_CATEGORIES) return vragen;
@@ -92,17 +114,27 @@ export function useQuestions() {
     [vragen]
   );
 
+  const selectedGameQuestions = useMemo(() => {
+    if (selectedCategory === ALL_CATEGORIES) return activeQuestions;
+    return activeQuestions.filter((question) => cleanCategory(question.category) === selectedCategory);
+  }, [activeQuestions, selectedCategory]);
+
   function voegVragenToe(categoryOverride) {
     const items = splitInput(invoer);
     if (!items.length) return;
 
-    const category = cleanCategory(categoryOverride || newQuestionCategory);
+    const category = cleanCategory(categoryOverride ?? newQuestionCategory);
 
     setVragen((prev) => [
       ...prev,
       ...items.map((tekst) => ({ id: createId(), tekst, active: true, category })),
     ]);
-    setNewQuestionCategory(category);
+
+    if (category) {
+      setCustomCategories((prev) => [...new Set([...prev, category])]);
+      setNewQuestionCategory(category);
+    }
+
     setInvoer("");
   }
 
@@ -119,15 +151,23 @@ export function useQuestions() {
   }
 
   function veranderVraagCategorie(id, category) {
+    const cleaned = cleanCategory(category);
     setVragen((prev) =>
       prev.map((question) =>
-        question.id === id ? { ...question, category: cleanCategory(category) } : question
+        question.id === id ? { ...question, category: cleaned } : question
       )
     );
+
+    if (cleaned) {
+      setCustomCategories((prev) => [...new Set([...prev, cleaned])]);
+    }
   }
 
   function voegCategorieToe() {
     const category = cleanCategory(newCategoryName);
+    if (!category) return;
+
+    setCustomCategories((prev) => [...new Set([...prev, category])]);
     setNewQuestionCategory(category);
     setSelectedCategory(category);
     setNewCategoryName("");
@@ -155,19 +195,22 @@ export function useQuestions() {
 
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
+      localStorage.setItem(CATEGORY_STORAGE_KEY, JSON.stringify([]));
     } catch (err) {
       console.warn("Kon standaardvragen niet opslaan", err);
     }
 
     setVragen(seeded);
+    setCustomCategories([]);
     setSelectedCategory(ALL_CATEGORIES);
-    setNewQuestionCategory(DEFAULT_CATEGORY);
+    setNewQuestionCategory("");
     alert("Standaard vragen opnieuw geladen.");
   }
 
   return {
     vragen,
     activeQuestions,
+    selectedGameQuestions,
     visibleQuestions,
     categories,
     selectedCategory,

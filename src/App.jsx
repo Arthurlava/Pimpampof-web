@@ -22,7 +22,6 @@ import {
   WHATS_NEW_COLLAPSE_KEY,
   WORDCHECK_AI_ENDPOINT,
 } from "./config/constants";
-import { DEFAULT_VRAGEN } from "./data/defaultQuestions";
 import { WHATS_NEW } from "./data/whatsNew";
 import { styles } from "./styles/styles";
 import { Button } from "./components/common/Button";
@@ -66,6 +65,7 @@ export default function PimPamPofWeb() {
   const {
     vragen,
     activeQuestions,
+    selectedGameQuestions,
     visibleQuestions,
     categories,
     selectedCategory,
@@ -134,7 +134,7 @@ const [offDoubleCount, setOffDoubleCount] = useState(0);
 
 function startOffline() {
   const qs = getSeedQuestions();
-  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+  if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
 
   setOfflineSolo(true);
   setOffOrder(shuffle([...Array(qs.length).keys()]));
@@ -308,7 +308,7 @@ const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   const players = names.map(name => ({ id: createId(), name }));
 
   const qs = getSeedQuestions();
-  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+  if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
 
   const initScores = {};
   const initStats = {};
@@ -637,8 +637,7 @@ function attachRoomListener(code) {
 
 
   function getSeedQuestions() {
-    const active = activeQuestions.map((question) => question.tekst).filter(Boolean);
-    return active.length > 0 ? active : DEFAULT_VRAGEN;
+    return selectedGameQuestions.map((question) => question.tekst).filter(Boolean);
   }
 
   async function createRoom({ autoStart = false, solo = false } = {}) {
@@ -653,6 +652,7 @@ function attachRoomListener(code) {
 
     const code = makeRoomCode();
     const qs = getSeedQuestions();
+    if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
     const order = shuffle([...Array(qs.length).keys()]);
     const playersOrder = [playerId];
 

@@ -39,9 +39,25 @@ body[data-theme="purple"] {
   --panel-bg: rgba(255,255,255,0.06);
   --panel-border: rgba(216,180,254,0.25);
 }
-html, body, #root { height: 100%; }
-    body { margin: 0; background: linear-gradient(180deg, var(--page-bg-start) 0%, var(--page-bg-end) 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-   #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px 120px; box-sizing: border-box; display: block !important; float: none !important; }
+html, body, #root { min-height: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--page-bg-start);
+  color: #fff;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+#root {
+  width: min(100%, 720px) !important;
+  min-height: 100vh;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding: 24px 16px 120px;
+  box-sizing: border-box;
+  display: block !important;
+  float: none !important;
+  background: linear-gradient(180deg, var(--page-bg-start) 0%, var(--page-bg-end) 100%);
+}
     .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); font-size: 12px; }
     .muted { color: rgba(255,255,255,0.7); font-size:12px; }
     .mini-hud { display:flex; gap:8px; flex-wrap:wrap; }
@@ -148,9 +164,7 @@ html, body, #root { height: 100%; }
   width: 100%;
   padding: 18px;
   border-radius: 22px;
-  background:
-    radial-gradient(circle at top left, rgba(255,255,255,0.13), transparent 32%),
-    rgba(255,255,255,0.055);
+  background: rgba(255,255,255,0.055);
   border: 1px solid rgba(255,255,255,0.14);
   box-shadow: 0 14px 36px rgba(0,0,0,0.28);
   box-sizing: border-box;
@@ -189,9 +203,7 @@ html, body, #root { height: 100%; }
 
 .mode-card-featured {
   border-color: rgba(255,255,255,0.24);
-  background:
-    linear-gradient(135deg, rgba(255,255,255,0.12), rgba(255,255,255,0.055)),
-    rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.09);
 }
 
 .mode-card-header {
@@ -331,5 +343,76 @@ html, body, #root { height: 100%; }
 
   .settings-header {
     flex-direction: column;
+  }
+}
+
+
+.question-manager-top {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.question-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.question-toolbar-actions,
+.question-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.question-add-panel {
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.045);
+  border: 1px solid rgba(255,255,255,0.1);
+}
+
+.mode-grid {
+  grid-template-columns: 1fr;
+}
+
+.mode-card {
+  min-height: auto;
+  padding: 14px;
+  border-radius: 16px;
+}
+
+.mode-card-header {
+  align-items: center;
+}
+
+.mode-card-actions {
+  margin-top: 4px;
+}
+
+@media (min-width: 720px) {
+  .mode-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .question-toolbar {
+    align-items: stretch;
+  }
+
+  .question-toolbar-actions,
+  .question-actions {
+    justify-content: stretch;
+  }
+
+  .question-actions > * {
+    flex: 1 1 auto;
   }
 }

@@ -28,10 +28,13 @@ export function QuestionManager({
   onChangeQuestionCategory,
 }) {
   const [isAddingCategory, setIsAddingCategory] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+
   const activeCount = activeQuestions.length;
   const realCategories = categories.filter((category) => category !== "Alles");
   const addCategoryValue = newCategoryName.trim();
   const currentInputCategory = selectedCategory === "Alles" ? newQuestionCategory : selectedCategory;
+  const listTitle = selectedCategory === "Alles" ? "Alle vragen" : `Vragen: ${selectedCategory}`;
 
   function addCategory() {
     if (!addCategoryValue) return;
@@ -41,11 +44,12 @@ export function QuestionManager({
 
   function addQuestions() {
     onAddQuestions(currentInputCategory);
+    setAddOpen(false);
   }
 
   return (
-    <>
-      <Section title="Vragen beheren">
+    <Section title={listTitle}>
+      <div className="question-manager-top">
         <div className="question-tabs">
           {categories.map((category) => (
             <button
@@ -87,75 +91,75 @@ export function QuestionManager({
           )}
         </div>
 
-        <p className="muted" style={{ marginBottom: 0 }}>
-          Actieve vragen in spel: <b>{activeCount}</b> / {totalQuestions}. Tab <b>Alles</b> toont alle vragen.
-        </p>
-      </Section>
-
-      <Section title="Nieuwe vragen (gescheiden met , of enter)">
-        <Row>
-          <span className="badge">
-            Nieuwe vragen naar: <b>{currentInputCategory}</b>
+        <div className="question-toolbar">
+          <span className="muted">
+            {selectedCategory === "Alles"
+              ? `Alle actieve vragen worden gebruikt: ${activeCount} / ${totalQuestions}`
+              : `Alleen actieve vragen uit deze categorie worden gebruikt.`}
           </span>
-          {selectedCategory === "Alles" && realCategories.length > 1 && (
-            <span className="muted">
-              Kies eerst een categorie-tab als je vragen direct in die categorie wilt plaatsen.
-            </span>
-          )}
-        </Row>
 
-        <TextArea value={input} onChange={onInputChange} />
-        <div style={{ marginTop: 12 }}>
-          <Row>
-            <Button onClick={addQuestions}>Voeg vragen toe</Button>
+          <div className="question-toolbar-actions">
+            <Button variant="alt" onClick={() => setAddOpen((open) => !open)}>
+              {addOpen ? "Nieuwe vragen sluiten" : "+ Vragen toevoegen"}
+            </Button>
             <Button variant="alt" onClick={onCopyAll}>Kopieer alle vragen</Button>
             <Button variant="stop" onClick={onResetDefault}>Reset naar standaard</Button>
-          </Row>
+          </div>
         </div>
-      </Section>
 
-      <Section title={selectedCategory === "Alles" ? "Alle vragen" : `Vragen: ${selectedCategory}`}>
-        {questions.length === 0 ? (
-          <p style={{ opacity: 0.7 }}>Geen vragen in deze categorie.</p>
-        ) : (
-          <ul style={styles.list}>
-            {questions.map((question) => (
-              <li
-                key={question.id}
-                style={{
-                  ...styles.li,
-                  opacity: question.active === false ? 0.55 : 1,
-                }}
-              >
-                <div style={styles.liText}>
-                  <div>{question.tekst}</div>
-                  <div className="mini-hud" style={{ marginTop: 6 }}>
-                    <span className="badge">{question.active === false ? "Uit" : "Actief"}</span>
-                    <span className="badge">{question.category || "Algemeen"}</span>
-                    <select
-                      aria-label="Vraagcategorie wijzigen"
-                      value={question.category || "Algemeen"}
-                      onChange={(event) => onChangeQuestionCategory(question.id, event.target.value)}
-                      style={styles.select}
-                    >
-                      {realCategories.map((category) => (
-                        <option key={category} value={category}>{category}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                  <Button variant="alt" onClick={() => onToggleQuestionActive(question.id)}>
-                    {question.active === false ? "Aanzetten" : "Uitzetten"}
-                  </Button>
-                  <DangerButton onClick={() => onRemoveQuestion(question.id)}>❌</DangerButton>
-                </div>
-              </li>
-            ))}
-          </ul>
+        {addOpen && (
+          <div className="question-add-panel">
+            <p className="muted" style={{ marginTop: 0 }}>
+              Nieuwe vragen gaan naar: <b>{currentInputCategory || "Geen categorie"}</b>
+            </p>
+            <TextArea value={input} onChange={onInputChange} />
+            <div style={{ marginTop: 12 }}>
+              <Row>
+                <Button onClick={addQuestions}>Voeg vragen toe</Button>
+              </Row>
+            </div>
+          </div>
         )}
-      </Section>
-    </>
+      </div>
+
+      {questions.length === 0 ? (
+        <p style={{ opacity: 0.7 }}>Geen vragen in deze categorie.</p>
+      ) : (
+        <ul style={styles.list}>
+          {questions.map((question) => (
+            <li
+              key={question.id}
+              style={{
+                ...styles.li,
+                opacity: question.active === false ? 0.55 : 1,
+              }}
+            >
+              <div style={styles.liText}>{question.tekst}</div>
+
+              <div className="question-actions">
+                {realCategories.length > 0 && (
+                  <select
+                    aria-label="Vraagcategorie wijzigen"
+                    value={question.category || ""}
+                    onChange={(event) => onChangeQuestionCategory(question.id, event.target.value)}
+                    style={styles.select}
+                  >
+                    <option value="">Geen categorie</option>
+                    {realCategories.map((category) => (
+                      <option key={category} value={category}>{category}</option>
+                    ))}
+                  </select>
+                )}
+
+                <Button variant="alt" onClick={() => onToggleQuestionActive(question.id)}>
+                  {question.active === false ? "Aanzetten" : "Uitzetten"}
+                </Button>
+                <DangerButton onClick={() => onRemoveQuestion(question.id)}>❌</DangerButton>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   );
 }
