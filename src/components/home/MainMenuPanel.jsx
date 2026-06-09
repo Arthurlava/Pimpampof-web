@@ -43,7 +43,7 @@ export function MainMenuPanel({
         <MenuCard
           title="Solo"
           text="Speel alleen met timer, punten, Jilla en Dubble pof."
-          badge="Snel starten"
+          badge="Solo spelen"
           featured
         >
           <Button onClick={onStartSolo}>Start solo</Button>
