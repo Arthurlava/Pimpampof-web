@@ -65,8 +65,8 @@ export function MainMenuPanel({
           {online ? (
             <>
               <div className="mode-action-row">
-                <Button variant="alt" onClick={onCreateRoom}>Room aanmaken</Button>
-                <Button variant="alt" onClick={onBrowseRooms}>Rooms bekijken</Button>
+                <Button variant="alt" onClick={onCreateRoom}>Maak room</Button>
+                <Button variant="alt" onClick={onBrowseRooms}>Join rooms</Button>
               </div>
               <div className="room-code-row">
                 <input
