@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_VRAGEN } from "../data/defaultQuestions";
 import { OLD_KEYS, STORAGE_KEY } from "../config/constants";
-import { splitInput } from "../utils/gameUtils";
+import { createId, splitInput } from "../utils/gameUtils";
 
 function createDefaultQuestions() {
   return DEFAULT_VRAGEN.map((tekst) => ({
-    id: crypto.randomUUID(),
+    id: createId(),
     tekst: String(tekst),
   }));
 }
@@ -37,7 +37,7 @@ function loadStoredQuestions() {
     }
 
     return parsed.map((question) => ({
-      id: question?.id || crypto.randomUUID(),
+      id: question?.id || createId(),
       tekst: String(question?.tekst ?? ""),
     }));
   } catch {
@@ -63,7 +63,7 @@ export function useQuestions() {
 
     setVragen((prev) => [
       ...prev,
-      ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst })),
+      ...items.map((tekst) => ({ id: createId(), tekst })),
     ]);
     setInvoer("");
   }
