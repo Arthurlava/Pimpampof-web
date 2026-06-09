@@ -1,484 +1,118 @@
 // src/App.jsx
 import React, { useEffect, useRef, useState } from "react";
-import { initializeApp } from "firebase/app";
-import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { onAuthStateChanged } from "firebase/auth";
 import {
-  getDatabase, ref, onValue, set, update, get, runTransaction, serverTimestamp,
+  ref, onValue, set, update, get, runTransaction, serverTimestamp,
   onDisconnect, remove
 } from "firebase/database";
-
-/* ---- GAME CONSTANTS (multiplayer) ---- */
-const MAX_TIME_MS = 120000;
-const MAX_POINTS = 200;
-const DOUBLE_POF_BONUS = 100;
-const JILLA_PENALTY = 25;
-const COOLDOWN_MS = 5000;
-const OFFLINE_MULTI_MAX_PLAYERS = 20;
-const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";
-const PRIOR_MEAN = 80;
-const PRIOR_WEIGHT = 10;
-const MIN_ANS_FOR_BEST = 5;
-const WORDCHECK_AI_ENDPOINT = import.meta.env.VITE_WORDCHECK_ENDPOINT || "";
-
-// Rooms die langer dan 4 minuten inactief zijn en niemand online hebben, worden opgeruimd
-const STALE_ROOM_MS = 4 * 60 * 1000;
-
-/* --- GLOBALE CSS + Animaties --- */
-const GlobalStyle = () => (
-  <style>{`
-    html, body, #root { height: 100%; }
-    body { margin: 0; background: linear-gradient(180deg, #171717 0%, #262626 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
-   #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px 120px; box-sizing: border-box; display: block !important; float: none !important; }
-    .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); font-size: 12px; }
-    .muted { color: rgba(255,255,255,0.7); font-size:12px; }
-    .mini-hud { display:flex; gap:8px; flex-wrap:wrap; }
-.scorebar {
-  position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 12px;
-  width: min(100%, 720px);
-  display: flex;
-  gap: 8px;
-  overflow-x: auto;
-  padding: 10px 10px;
-  border-radius: 16px;
-  background: rgba(0,0,0,0.35);
-  border: 1px solid rgba(255,255,255,0.12);
-  backdrop-filter: blur(6px);
-  z-index: 5000;
-  pointer-events: auto;
-}
-
-.scorechip {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 999px;
-  background: rgba(255,255,255,0.08);
-  border: 1px solid rgba(255,255,255,0.15);
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-.scorechip-active {
-  background: rgba(22,163,74,0.18);
-  border-color: rgba(22,163,74,0.35);
-}
-
-    @keyframes pofPop {
-      0%{transform:scale(0.6);opacity:0;}
-      20%{transform:scale(1.12);opacity:1;}
-      50%{transform:scale(1);}
-      100%{transform:scale(.9);opacity:0;}
-    }
-    .pof-toast { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: none; z-index: 9999; }
-    .pof-bubble { background: radial-gradient(circle at 30% 30%, rgba(34,197,94,0.96), rgba(16,185,129,0.92)); padding: 18px 26px; border-radius: 999px; font-size: 28px; font-weight: 800; box-shadow: 0 12px 40px rgba(0,0,0,.35); animation: pofPop 1200ms ease-out forwards; letter-spacing: .5px; }
-
-    @keyframes jillaPulse {
-      0%,100%{transform:translateY(0);box-shadow:0 8px 24px rgba(251,146,60,.25);}
-      50%{transform:translateY(-2px);box-shadow:0 12px 34px rgba(251,146,60,.35);}
-    }
-    .jilla-banner {
-      display:inline-flex; align-items:center; gap:10px;
-      background: linear-gradient(90deg, #f97316, #fb923c);
-      color:#111; font-weight:800; padding:10px 14px;
-      border-radius:999px; border:1px solid rgba(255,255,255,.3);
-      animation: jillaPulse 1.3s ease-in-out infinite;
-    }
-    @keyframes jillaPop {
-      0%{transform:translateY(6px);opacity:0;}
-      15%{transform:translateY(0);opacity:1;}
-      85%{transform:translateY(0);opacity:1;}
-      100%{transform:translateY(-6px);opacity:0;}
-    }
-    .jilla-toast { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); z-index: 9999; pointer-events: none; }
-    .jilla-bubble { background: linear-gradient(90deg, #fb923c, #f97316); color:#111; font-weight: 800; padding: 10px 14px; border-radius: 999px; box-shadow: 0 12px 28px rgba(0,0,0,.35); animation: jillaPop 1800ms ease-out forwards; }
-
-    @keyframes scoreToast {
-      0%{transform:translateY(8px);opacity:0;}
-      15%{transform:translateY(0);opacity:1;}
-      85%{transform:translateY(0);opacity:1;}
-      100%{transform:translateY(-6px);opacity:0;}
-    }
-    .score-toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 9999; pointer-events: none; animation: scoreToast 1400ms ease-out forwards; }
-    .score-bubble { padding: 10px 14px; border-radius: 999px; font-weight: 800; box-shadow: 0 12px 28px rgba(0,0,0,.35); font-size: 16px; }
-    .score-plus { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
-    .score-minus { background: linear-gradient(90deg, #ef4444, #dc2626); color: #180404; }
-
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
-    .card { width: min(92vw, 720px); max-height: 88vh; overflow: auto; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
-
-    .table { width:100%; border-collapse: collapse; }
-    .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
-    .table th { font-weight: 700; }
-
-    .hot-jilla { outline: 2px solid #fb923c; border-radius: 12px; }
-  `}</style>
-);
-
-/* ---------- standaard vragen ---------- */
-const DEFAULT_VRAGEN = [
-  "Noem iets dat je in de koelkast vindt.",
-  "Zeg iets dat leeft in de zee.",
-  "Noem een dier met vier poten.",
-  "Zeg iets dat je in een supermarkt kunt kopen.",
-  "Zeg iets wat je in een rugzak stopt.",
-  "Noem een sport.",
-  "Noem iets wat je op je hoofd kunt dragen.",
-  "Zeg iets dat je buiten kunt vinden.",
-  "Noem een fruit.",
-  "Noem iets wat je in een slaapkamer ziet.",
-  "Zeg een vervoermiddel.",
-  "Noem iets wat kinderen leuk vinden.",
-  "Zeg iets wat je in de badkamer gebruikt.",
-  "Zeg iets dat koud kan zijn.",
-  "Noem een muziekinstrument.",
-  "Zeg iets dat je op school vindt.",
-  "Noem een snoepje of snack.",
-  "Zeg iets wat je met water associeert.",
-  "Noem iets dat kan vliegen.",
-  "Zeg iets dat je op een verjaardag ziet.",
-  "Noem iets dat je op een pizza kunt doen.",
-  "Zeg een lichaamsdeel.",
-  "Noem iets wat je in de tuin vindt.",
-  "Zeg iets wat je met je handen doet.",
-  "Noem een dier.",
-  "Zeg iets dat je kunt eten.",
-  "Noem een land buiten Europa.",
-  "Zeg iets dat je kunt horen.",
-  "Noem iets wat je in een klaslokaal vindt.",
-  "Noem een spel.",
-  "Noem een dier dat kleiner is dan een kat.",
-  "Noem iets dat rond is.",
-  "Noem een keukengerei.",
-  "Zeg iets dat je op een broodje doet.",
-  "Noem een voertuig op wielen.",
-  "Noem een ijsjessmaak.",
-  "Noem iets met vleugels.",
-  "Noem een soort snoep.",
-  "Zeg iets dat zacht is.",
-  "Noem een groente.",
-  "Noem iets wat plakt.",
-  "Zeg iets wat je op vakantie meeneemt.",
-  "Zeg iets dat je vaak in films ziet.",
-  "Noem iets wat je in een ziekenhuis tegenkomt.",
-  "Zeg iets dat licht geeft.",
-  "Noem iets wat lawaai maakt.",
-  "Zeg iets wat met technologie te maken heeft.",
-  "Noem een land in Europa.",
-  "Zeg iets wat met ruimte of sterren te maken heeft.",
-  "Zeg iets wat je kunt openen én sluiten.",
-  "Noem een woord dat je doet denken aan vakantie.",
-  "Zeg iets wat je in een bos vindt.",
-  "Noem iets wat je op een camping ziet.",
-  "Noem een machine.",
-  "Noem iets wat stroom gebruikt.",
-  "Zeg iets wat met reizen te maken heeft.",
-  "Noem een gevaarlijk object.",
-  "Zeg iets dat je zelf kunt maken.",
-  "Noem een uitvinding van de laatste 100 jaar.",
-  "Zeg iets wat je op een markt ziet.",
-  "Noem iets wat veel mensen verzamelen.",
-  "Zeg iets wat je niet in huis wilt hebben.",
-  "Noem iets met meerdere onderdelen.",
-  "Zeg iets dat zowel in het echt als in games voorkomt.",
-  "Noem een object dat je met beide handen moet gebruiken.",
-  "Zeg iets dat sneller is dan een mens.",
-  "Zeg iets dat vroeger bestond maar nu zeldzaam is.",
-  "Noem iets wat echt klinkt maar niet bestaat.",
-  "Noem een insect.",
-  "Zeg iets dat je met een mes kunt snijden.",
-  "Zeg iets wat je op een rommelmarkt kunt kopen.",
-  "Noem iets wat je in een theater ziet.",
-  "Noem iets dat je in een dierentuin vindt.",
-  "Zeg iets dat je in een park kunt doen.",
-  "Noem iets dat lekker ruikt.",
-  "Zeg iets wat je in een handtas stopt.",
-  "Noem iets dat met een bal te maken heeft.",
-  "Noem iets wat in een rugzak past.",
-  "Zeg iets dat snel beweegt.",
-  "Noem iets wat je in een kast bewaart.",
-  "Zeg iets dat gemaakt is van plastic.",
-  "Zeg iets wat je in een bibliotheek vindt.",
-  "Noem iets wat je op een festival ziet.",
-  "Zeg iets dat uit een blikje komt.",
-  "Zeg iets wat je onder een bed vindt.",
-  "Noem iets dat kan springen.",
-  "Zeg iets dat snel en gevaarlijk is.",
-  "Noem iets wat in de natuur groeit.",
-  "Zeg iets dat je drinkt.",
-  "Noem iets dat je in je zak stopt.",
-  "Noem iets dat zwaar is.",
-  "Zeg iets dat in een doos past.",
-  "Zeg iets wat je alleen buiten ziet.",
-  "Noem iets dat je met muziek associeert.",
-  "Noem iets wat in een winkelcentrum is.",
-  "Noem iets wat je bij een concert vind.",
-  "Zeg iets wat je niet aan een kind geeft.",
-  "Noem iets dat je op een bord legt.",
-  "Noem iets wat je op een feest kan vinden.",
-  "Noem iets dat je op een kaart vindt."
-];
-const WHATS_NEW = {
-  updatedAtLabel: "26 dec 2025",
-  items: [
-    "Offline multiplayer toegevoegd. multiplayer met punten op een apperaat!",
-    "Solo Modus heeft nu ook punten!",
-    "Check Woord knop toegevoegd voor als je niet zeker weet of een woord bestaat!",
-    "Dierenspel gefixed en zelfde rooms bekijken en joinen functionaliteit toegevoegd",
-    "Fixed: Offline spelers worden niet meer geskipped!",
-  ],
-};
-
-const WHATS_NEW_COLLAPSE_KEY = "ppp.whatsnew.collapsed";
-
-
-/* ---------- styles ---------- */
-const styles = {
-  wrap: { display: "flex", flexDirection: "column", gap: 20, textAlign: "center", alignItems: "center" },
-  header: { display: "flex", flexDirection: "column", gap: 12, alignItems: "center" },
-  h1: { fontSize: 28, fontWeight: 800, margin: 0 },
-  row: { display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center", justifyContent: "center" },
-  section: { width: "100%", padding: 16, borderRadius: 16, background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", boxShadow: "0 8px 22px rgba(0,0,0,0.3)", boxSizing: "border-box" },
-  sectionTitle: { margin: "0 0 8px 0", fontSize: 18, fontWeight: 700 },
-  btn: { padding: "10px 16px", borderRadius: 12, border: "none", background: "#16a34a", color: "#fff", fontSize: 14, fontWeight: 600, cursor: "pointer" },
-  btnAlt: { background: "#065f46" },
-  btnStop: { background: "#475569" },
-  btnDanger: { padding: "6px 10px", borderRadius: 10, border: "none", background: "#dc2626", color: "#fff", fontSize: 13, cursor: "pointer" },
-  input: { padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none" },
-  textarea: { width: "100%", minHeight: 120, resize: "vertical", padding: 12, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", boxSizing: "border-box" },
-  list: { listStyle: "none", padding: 0, margin: 0 },
-  li: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", borderTop: "1px solid rgba(255,255,255,0.1)" },
-  liText: { lineHeight: 1.4, textAlign: "left" },
-  letterInput: { marginTop: 8, width: 200, textAlign: "center", padding: 10, borderRadius: 12, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.05)", color: "#fff", outline: "none", fontSize: 16, boxSizing: "border-box" },
-  foot: { fontSize: 12, color: "rgba(255,255,255,0.6)" }
-};
-
-// ---- STORAGE ----
-const STORAGE_VERSION = 4;
-const STORAGE_KEY = `ppp.vragen.v${STORAGE_VERSION}`;
-const OLD_KEYS = ["ppp.vragen", "ppp.vragen.v2", "ppp.vragen.v3"];
-
-/* ---------- FIREBASE INIT ---------- */
-const firebaseConfig = {
-  apiKey: "AIzaSyDuYvtJbjj0wQbSwIBtyHuPeF71poPIBUg",
-  authDomain: "pimpampof-aec32.firebaseapp.com",
-  databaseURL: "https://pimpampof-aec32-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "pimpampof-aec32",
-  storageBucket: "pimpampof-aec32.firebasestorage.app",
-  messagingSenderId: "872484746189",
-  appId: "1:872484746189:web:a76c7345c4f2ebb6790a84"
-};
-const firebaseApp = initializeApp(firebaseConfig);
-const auth = getAuth(firebaseApp);
-const db = getDatabase(firebaseApp);
-
-// Altijd anoniem inloggen (en klaar-flag zetten)
-const AUTH_READY_EVENT = "ppp-auth-ready";
-onAuthStateChanged(auth, (user) => {
-  if (!user) {
-    signInAnonymously(auth).catch((e) => console.error("Anon sign-in failed:", e));
-  } else {
-    window.dispatchEvent(new Event(AUTH_READY_EVENT));
-  }
-});
-
-/* ---------- helpers ---------- */
-function normalizeWordForCheck(raw) {
-  const s = String(raw || "").trim().replace(/\s+/g, " ");
-  return s.length > 80 ? s.slice(0, 80) : s;
-}
-async function checkWordViaAiEndpoint(word, endpoint, signal) {
-  const res = await fetch(endpoint, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ word }),
-    signal
-  });
-
-  if (!res.ok) throw new Error(`AI endpoint HTTP ${res.status}`);
-
-  const json = await res.json();
-  return {
-    exists: !!json.exists,
-    source: "AI",
-    url: json.url || getWiktionaryUrl(word),
-    note: json.note || null
-  };
-}
-
-function getWiktionaryUrl(word) {
-  const title = normalizeWordForCheck(word).replace(/\s+/g, "_");
-  return `https://nl.wiktionary.org/wiki/${encodeURIComponent(title)}`;
-}
-
-function getGoogleMeaningUrl(word) {
-  const q = `${normalizeWordForCheck(word)} betekenis`;
-  return `https://www.google.com/search?q=${encodeURIComponent(q)}`;
-}
-
-async function checkWordViaNlWiktionary(word, signal) {
-  const endpoint = "https://nl.wiktionary.org/w/api.php";
-  const url =
-    `${endpoint}?action=query&titles=${encodeURIComponent(word)}` +
-    `&format=json&redirects=1&origin=*`;
-
-  const res = await fetch(url, { method: "GET", signal });
-  if (!res.ok) throw new Error(`Wiktionary HTTP ${res.status}`);
-
-  const json = await res.json();
-  const pages = json?.query?.pages;
-  if (!pages || typeof pages !== "object") throw new Error("Unexpected Wiktionary response.");
-
-  const firstKey = Object.keys(pages)[0];
-  const page = pages[firstKey] || null;
-
-  const exists = firstKey !== "-1" && !page?.missing;
-  return {
-    exists,
-    source: "Wiktionary",
-    url: getWiktionaryUrl(word),
-  };
-}
-function calcPoints(ms) {
-  const p = Math.floor(MAX_POINTS * (1 - ms / MAX_TIME_MS));
-  return Math.max(0, p);
-}
-
-function Section({ title, children }) {
-  return (
-    <div style={styles.section}>
-      {title && <h2 style={styles.sectionTitle}>{title}</h2>}
-      {children}
-    </div>
-  );
-}
-function Row({ children }) { return <div style={styles.row}>{children}</div>; }
-function Button({ children, onClick, variant, disabled, title }) {
-  let s = { ...styles.btn };
-  if (variant === "alt") s = { ...s, ...styles.btnAlt };
-  if (variant === "stop") s = { ...s, ...styles.btnStop };
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      style={{ ...s, opacity: disabled ? .6 : 1, cursor: disabled ? "not-allowed" : "pointer" }}
-      disabled={disabled}
-    >
-      {children}
-    </button>
-  );
-}
-function DangerButton({ children, onClick }) {
-  return <button onClick={onClick} style={styles.btnDanger}>{children}</button>;
-}
-function TextArea({ value, onChange, placeholder }) {
-  return (
-    <textarea
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      style={styles.textarea}
-    />
-  );
-}
-
-function shuffle(arr) {
-  for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [arr[i], arr[j]] = [arr[j], arr[i]];
-  }
-  return arr;
-}
-function splitInput(text) {
-  return String(text || "")
-    .split(/[\n,]+/)
-    .map(s => s.trim())
-    .filter(Boolean);
-}
-const START_CONSONANTS = ["B", "C", "D", "F", "G", "H", "J", "K", "L", "M", "N", "P", "R", "S", "T", "V", "W"];
-function randomStartConsonant() {
-  return START_CONSONANTS[Math.floor(Math.random() * START_CONSONANTS.length)];
-}
-function normalizeLetter(ch) {
-  return (ch ?? "").toString().trim().toUpperCase();
-}
-function ordinal(n) {
-  return `${n}e`;
-}
-function fmtDuration(ms) {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  const two = (n) => n.toString().padStart(2, "0");
-  return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
-}
-function useOnline() {
-  const [online, setOnline] = React.useState(typeof navigator !== "undefined" ? navigator.onLine : true);
-  React.useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
-  return online;
-}
-function canLeaveRoom(data) {
-  if (!data) return true;
-  if (data.solo) return true;
-  if (!data.started) return true;
-  if (data.finished) return true;
-  return data.turn === data.hostId;
-}
-function hasPresence(data, pid) {
-  const c = data?.presence?.[pid];
-  return !!(c && typeof c === "object" && Object.keys(c).length > 0);
-}
+import "./styles/global.css";
+import { auth, db, AUTH_READY_EVENT } from "./config/firebase";
+import {
+  COOLDOWN_MS,
+  DOUBLE_POF_BONUS,
+  JILLA_PENALTY,
+  MAX_TIME_MS,
+  MIN_ANS_FOR_BEST,
+  NAME_KEY,
+  OFFLINE_MULTI_MAX_PLAYERS,
+  PRIOR_MEAN,
+  PRIOR_WEIGHT,
+  STALE_ROOM_MS,
+  URL_DIEREN,
+  WHATS_NEW_COLLAPSE_KEY,
+  WORDCHECK_AI_ENDPOINT,
+} from "./config/constants";
+import { WHATS_NEW } from "./data/whatsNew";
+import { styles } from "./styles/styles";
+import { Button } from "./components/common/Button";
+import { DangerButton } from "./components/common/DangerButton";
+import { Row } from "./components/common/Row";
+import { Section } from "./components/common/Section";
+import { useOnline } from "./hooks/useOnline";
+import { useQuestions } from "./hooks/useQuestions";
+import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
+import { WhatsNewPanel } from "./components/home/WhatsNewPanel";
+import { SettingsOverlay } from "./components/home/SettingsOverlay";
+import { MainMenuPanel } from "./components/home/MainMenuPanel";
+import { QuestionManager } from "./components/questions/QuestionManager";
+import { RoomBrowser } from "./components/online/RoomBrowser";
+import { BottomScoreBar } from "./components/online/BottomScoreBar";
+import { ProfileOverlay } from "./components/profile/ProfileOverlay";
+import { WordCheckOverlay } from "./components/word-check/WordCheckOverlay";
+import { OfflineMultiSetup } from "./components/offline/OfflineMultiSetup";
+import { OfflineResultOverlay } from "./components/offline/OfflineResultOverlay";
+import { LeaderboardOverlay } from "./components/feedback/LeaderboardOverlay";
+import { PofToast } from "./components/feedback/PofToast";
+import { ScoreToast } from "./components/feedback/ScoreToast";
+import { ImpossibleComboReportOverlay } from "./components/reports/ImpossibleComboReportOverlay";
+import { ImpossibleReportsReviewOverlay } from "./components/reports/ImpossibleReportsReviewOverlay";
+import {
+  calcPoints,
+  canLeaveRoom,
+  clampInt,
+  fmtDuration,
+  hasPresence,
+  normalizeLetter,
+  randomStartConsonant,
+  shuffle,
+  createId,
+} from "./utils/gameUtils";
+import {
+  checkWordViaAiEndpoint,
+  checkWordViaNlWiktionary,
+  normalizeWordForCheck,
+} from "./utils/wordCheck";
+import {
+  isImpossibleComboApproved,
+  makeImpossibleComboKey,
+  normalizeComboLetter,
+  normalizeComboQuestion,
+} from "./utils/impossibleCombos";
 
 /* ---------- App ---------- */
-const NAME_KEY = "ppp.playerName";
-
 export default function PimPamPofWeb() {
-  // vragen state + init
-  const [vragen, setVragen] = useState(() => {
-    try {
-      OLD_KEYS.forEach((k) => localStorage.removeItem(k));
-      const raw = localStorage.getItem(STORAGE_KEY);
-      const seed = () => DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
-      if (!raw) {
-        const seeded = seed();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-        return seeded;
-      }
-      let parsed;
-      try { parsed = JSON.parse(raw); }
-      catch {
-        const seeded = seed();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-        return seeded;
-      }
-      if (!Array.isArray(parsed) || parsed.length === 0) {
-        const seeded = seed();
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-        return seeded;
-      }
-      return parsed.map((v) => ({ id: v?.id || crypto.randomUUID(), tekst: String(v?.tekst ?? "") }));
-    } catch {
-      return DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
-    }
-  });
-  const [invoer, setInvoer] = useState("");
+  const {
+    vragen,
+    activeQuestions,
+    selectedGameQuestions,
+    visibleQuestions,
+    categories,
+    selectedCategory,
+    setSelectedCategory,
+    newQuestionCategory,
+    setNewQuestionCategory,
+    newCategoryName,
+    setNewCategoryName,
+    voegCategorieToe,
+    invoer,
+    setInvoer,
+    voegVragenToe,
+    verwijderVraag,
+    toggleVraagActief,
+    veranderVraagCategorie,
+    kopieerAlle,
+    resetStandaardVragen,
+  } = useQuestions();
 
   const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
   useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
+
+  const [theme, setTheme] = useState(() => localStorage.getItem("ppp.theme") || "green");
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [offlineResult, setOfflineResult] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
+  const [reportDialog, setReportDialog] = useState(null);
+  const [reportBusy, setReportBusy] = useState(false);
+  const [reportReviewOpen, setReportReviewOpen] = useState(false);
+  const [impossibleReports, setImpossibleReports] = useState({});
+  const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
+  const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
+
+  useEffect(() => {
+    document.body.dataset.theme = theme;
+    localStorage.setItem("ppp.theme", theme);
+  }, [theme]);
 
   // playerId = auth.uid (wacht tot anonieme login klaar is)
   const [playerId, setPlayerId] = useState(null);
@@ -494,11 +128,38 @@ export default function PimPamPofWeb() {
   }, []);
 
   const online = useOnline();
+
+  useEffect(() => {
+    const reportsRef = ref(db, "impossibleComboReports");
+    const unsubscribe = onValue(reportsRef, (snap) => {
+      setImpossibleReports(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const approvedRef = ref(db, "impossibleCombos");
+    const unsubscribe = onValue(approvedRef, (snap) => {
+      setApprovedImpossibleCombos(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const backupsRef = ref(db, "impossibleComboBackups");
+    const unsubscribe = onValue(backupsRef, (snap) => {
+      setImpossibleComboBackups(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
 const [whatsOpen, setWhatsOpen] = useState(() => {
   try { return localStorage.getItem(WHATS_NEW_COLLAPSE_KEY) !== "1"; } catch { return true; }
 });
 useEffect(() => {
-  try { localStorage.setItem(WHATS_NEW_COLLAPSE_KEY, whatsOpen ? "0" : "1"); } catch { }
+  try { localStorage.setItem(WHATS_NEW_COLLAPSE_KEY, whatsOpen ? "0" : "1"); } catch { /* localStorage kan onbeschikbaar zijn */ }
 }, [whatsOpen]);
 
 // OFFLINE SOLO
@@ -516,8 +177,8 @@ const [offJillaCount, setOffJillaCount] = useState(0);
 const [offDoubleCount, setOffDoubleCount] = useState(0);
 
 function startOffline() {
-  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
-  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+  const qs = getSeedQuestions();
+  if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
 
   setOfflineSolo(true);
   setOffOrder(shuffle([...Array(qs.length).keys()]));
@@ -537,6 +198,17 @@ function startOffline() {
 }
 
 function stopOffline() {
+  if (offlineSolo) {
+    setOfflineResult({
+      type: "solo",
+      score: offScore,
+      answered: offAnswered,
+      totalTimeMs: offTotalTimeMs,
+      jilla: offJillaCount,
+      doublePof: offDoubleCount,
+    });
+  }
+
   setOfflineSolo(false);
   setOffIndex(-1);
   setOffLastLetter("?");
@@ -608,10 +280,6 @@ const [offmStats, setOffmStats] = useState({});
 const [offmJail, setOffmJail] = useState({});
 const [offmJillaLast, setOffmJillaLast] = useState(null);
 
-function clampInt(n, min, max) {
-  const x = Number.isFinite(n) ? Math.trunc(n) : min;
-  return Math.max(min, Math.min(max, x));
-}
 
 function openOfflineMultiSetup() {
   if (offlineSolo || offlineMulti) return;
@@ -622,6 +290,23 @@ function openOfflineMultiSetup() {
 }
 
 function stopOfflineMulti() {
+  if (offlineMulti && offmPlayers.length > 0) {
+    const players = offmPlayers.map((player) => {
+      const stats = offmStats[player.id] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+      return {
+        id: player.id,
+        name: player.name,
+        score: offmScores[player.id] || 0,
+        totalTimeMs: stats.totalTimeMs || 0,
+        answered: stats.answeredCount || 0,
+        jilla: stats.jillaCount || 0,
+        doublePof: stats.doubleCount || 0,
+      };
+    }).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+    setOfflineResult({ type: "multi", players });
+  }
+
   setOfflineMulti(false);
   setOffmSetupOpen(false);
   setOffmPlayers([]);
@@ -664,10 +349,10 @@ function startOfflineMultiFromSetup() {
 const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   const rawNames = (offmNames || []).slice(0, n).map(s => String(s || "").trim());
   const names = rawNames.map((nm, i) => nm || `Speler ${i + 1}`);
-  const players = names.map(name => ({ id: crypto.randomUUID(), name }));
+  const players = names.map(name => ({ id: createId(), name }));
 
   const qs = getSeedQuestions();
-  if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
+  if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
 
   const initScores = {};
   const initStats = {};
@@ -866,173 +551,237 @@ async function runWordCheck() {
   }
 }
 
-function renderWordCheckOverlay() {
-  if (!wordCheckOpen) return null;
+function openImpossibleReport(question, letter, mode) {
+  const cleanQuestion = normalizeComboQuestion(question);
+  const cleanLetter = normalizeComboLetter(letter);
 
-  const requiredLetter = normalizeLetter(
-    offlineSolo ? offLastLetter :
-    offlineMulti ? offmLastLetter :
-    (isOnlineRoom && room?.started ? room?.lastLetter : "?")
-  );
+  if (!cleanQuestion || !cleanLetter || cleanLetter === "?") {
+    alert("Er is geen geldige vraag + letter combinatie om te rapporteren.");
+    return;
+  }
 
-  const firstChar = normalizeLetter((normalizeWordForCheck(wordCheckWord) || "")[0] || "");
-  const hasReq = requiredLetter && requiredLetter !== "?";
-  const startsOk = hasReq && firstChar && firstChar === requiredLetter;
-
-  return (
-    <div className="overlay" onClick={closeWordCheck}>
-      <div className="card" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Check woord</h2>
-
-        <p className="muted" style={{ marginTop: 0 }}>
-          Controleert of een woord bestaat via NL Wiktionary (gratis).
-          {WORDCHECK_AI_ENDPOINT ? " Optioneel: AI-check beschikbaar." : " (AI-check vereist een serverless endpoint.)"}
-        </p>
-
-        {hasReq && (
-          <div className="mini-hud" style={{ margin: "10px 0" }}>
-            <span className="badge">Huidige letter: <b>{requiredLetter}</b></span>
-            {wordCheckWord.trim() && (
-              <span className="badge">
-                Startletter: <b>{firstChar || "?"}</b> — {startsOk ? "✅ ok" : "❌ niet ok"}
-              </span>
-            )}
-          </div>
-        )}
-
-        <input
-          style={{ ...styles.input, width: "min(520px, 100%)" }}
-          placeholder="Typ een woord…"
-          value={wordCheckWord}
-          onChange={(e) => setWordCheckWord(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") runWordCheck();
-            if (e.key === "Escape") closeWordCheck();
-          }}
-          autoFocus
-        />
-
-        <Row>
-          <Button onClick={runWordCheck} disabled={wordCheckBusy || !online}>
-            {wordCheckBusy ? "Bezig…" : "Check"}
-          </Button>
-
-          <Button
-            variant="alt"
-            onClick={() => window.open(getGoogleMeaningUrl(wordCheckWord), "_blank", "noopener,noreferrer")}
-            disabled={!normalizeWordForCheck(wordCheckWord)}
-            title="Zoek betekenis op Google"
-          >
-            Zoek op Google
-          </Button>
-
-          {WORDCHECK_AI_ENDPOINT && (
-            <label className="badge" style={{ cursor: "pointer", userSelect: "none" }} title="Eerst AI proberen (valt terug op Wiktionary)">
-              <input
-                type="checkbox"
-                checked={wordCheckPreferAi}
-                onChange={(e) => setWordCheckPreferAi(e.target.checked)}
-                style={{ marginRight: 8 }}
-              />
-              AI eerst
-            </label>
-          )}
-
-          <Button variant="stop" onClick={closeWordCheck}>Sluiten</Button>
-        </Row>
-
-        {wordCheckError && (
-          <div className="badge" style={{ marginTop: 10, background: "rgba(239,68,68,0.18)", borderColor: "rgba(239,68,68,0.35)" }}>
-            {wordCheckError}
-          </div>
-        )}
-
-        {wordCheckResult && (
-          <div style={{ marginTop: 12, textAlign: "left" }}>
-            <div className="badge" style={{
-              background: wordCheckResult.exists ? "rgba(22,163,74,0.18)" : "rgba(239,68,68,0.18)",
-              borderColor: wordCheckResult.exists ? "rgba(22,163,74,0.35)" : "rgba(239,68,68,0.35)"
-            }}>
-              {wordCheckResult.exists ? "Bestaat (gevonden)" : "Niet gevonden"}
-              <span className="muted" style={{ marginLeft: 10 }}>bron: {wordCheckResult.source}</span>
-            </div>
-
-            {wordCheckResult.note && (
-              <div className="muted" style={{ marginTop: 8 }}>{wordCheckResult.note}</div>
-            )}
-
-            <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <Button
-                variant="alt"
-                onClick={() => window.open(wordCheckResult.url, "_blank", "noopener,noreferrer")}
-              >
-                Open Wiktionary
-              </Button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  setReportDialog({ question: cleanQuestion, letter: cleanLetter, mode });
 }
-function renderOfflineMultiSetup() {
-  if (!offmSetupOpen) return null;
 
-  const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
+async function submitImpossibleReport() {
+  if (!reportDialog || reportBusy) return;
 
-  return (
-    <div className="overlay" onClick={() => setOffmSetupOpen(false)}>
-      <div className="card" onClick={(e) => e.stopPropagation()}>
-        <h2 style={{ marginTop: 0, marginBottom: 6 }}>Offline multiplayer</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Cooldown tussen beurten is het doorgeef-moment.
-        </p>
+  const key = makeImpossibleComboKey(reportDialog.question, reportDialog.letter);
+  const reportRef = ref(db, `impossibleComboReports/${key}`);
 
-        <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "center", flexWrap: "wrap" }}>
-          <span className="badge">Spelers</span>
-          <input
-            type="number"
-            min={2}
-            max={OFFLINE_MULTI_MAX_PLAYERS}
-            step={1}
-            value={n}
-            onChange={(e) => {
-              const parsed = parseInt(e.target.value, 10);
-              const next = clampInt(parsed, 2, OFFLINE_MULTI_MAX_PLAYERS);
-              setOffmPlayerCount(next);
-              setOffmNames(prev => Array.from({ length: next }, (_, i) => String(prev?.[i] ?? "")));
-            }}
-            style={{ ...styles.input, width: 120 }}
-          />
-          <span className="muted">min 2, max {OFFLINE_MULTI_MAX_PLAYERS}</span>
-        </div>
+  setReportBusy(true);
 
-        <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-          {Array.from({ length: n }, (_, i) => (
-            <input
-              key={i}
-              style={styles.input}
-              placeholder={`Naam speler ${i + 1}`}
-              value={offmNames?.[i] ?? ""}
-              onChange={(e) => {
-                const v = e.target.value;
-                setOffmNames(prev => {
-                  const arr = Array.from({ length: n }, (_, ix) => String(prev?.[ix] ?? ""));
-                  arr[i] = v;
-                  return arr;
-                });
-              }}
-            />
-          ))}
-        </div>
+  try {
+    await runTransaction(reportRef, (current) => {
+      const nowTs = Date.now();
 
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-          <Button variant="alt" onClick={() => setOffmSetupOpen(false)}>Annuleren</Button>
-          <Button onClick={startOfflineMultiFromSetup}>Start offline multiplayer</Button>
-        </div>
-      </div>
-    </div>
-  );
+      if (!current) {
+        return {
+          question: reportDialog.question,
+          letter: reportDialog.letter,
+          mode: reportDialog.mode || "unknown",
+          status: "pending",
+          count: 1,
+          createdAt: nowTs,
+          updatedAt: nowTs,
+          reportedBy: playerId || null,
+          reportedByName: playerName || "Speler",
+        };
+      }
+
+      if (current.status === "approved") return current;
+
+      return {
+        ...current,
+        question: current.question || reportDialog.question,
+        letter: current.letter || reportDialog.letter,
+        mode: reportDialog.mode || current.mode || "unknown",
+        status: "pending",
+        count: (current.count || 0) + 1,
+        updatedAt: nowTs,
+        reportedBy: playerId || current.reportedBy || null,
+        reportedByName: playerName || current.reportedByName || "Speler",
+      };
+    });
+
+    setReportDialog(null);
+    triggerScoreToast("Rapportage opgeslagen", "plus");
+  } catch (error) {
+    console.error("Kon rapportage niet opslaan", error);
+    alert("Kon rapportage niet opslaan. Controleer je verbinding of Firebase regels.");
+  } finally {
+    setReportBusy(false);
+  }
+}
+
+
+function skipImpossibleComboQuestion() {
+  if (!currentComboApproved) return;
+
+  const nowTs = Date.now();
+
+  if (offlineSolo) {
+    if (!offOrder.length) return;
+    setOffIndex((index) => (index + 1) % offOrder.length);
+    setOffTurnStartAt(nowTs);
+    triggerScoreToast("Nieuwe vraag geladen", "plus");
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (offlineMulti) {
+    if (offmPhase !== "answer" || !offmOrder.length) return;
+    setOffmIndex((index) => (index + 1) % offmOrder.length);
+    setOffmTurnStartAt(nowTs);
+    triggerScoreToast("Nieuwe vraag geladen", "plus");
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (isOnlineRoom && room?.started && isMyTurn && !inCooldown && !room?.paused) {
+    const roomRef = ref(db, `rooms/${roomCode}`);
+
+    runTransaction(roomRef, (data) => {
+      if (!data || !data.started || data.paused) return data;
+      if (data.turn !== playerId) return data;
+      if (data.phase !== "answer") return data;
+
+      const listLen = data.order?.length ?? 0;
+      if (!listLen) return data;
+
+      data.currentIndex = (data.currentIndex + 1) % listLen;
+      data.turnStartAt = Date.now();
+      data.lastActivityAt = Date.now();
+      data.lastEvent = { type: "impossible_combo_new_question", by: playerId, at: Date.now() };
+      return data;
+    })
+      .then(() => {
+        triggerScoreToast("Nieuwe vraag geladen", "plus");
+        setTimeout(() => letterRef.current?.focus(), 0);
+      })
+      .catch((error) => {
+        console.error("Kon geen nieuwe vraag laden", error);
+        alert("Kon geen nieuwe vraag laden. Controleer je verbinding of Firebase regels.");
+      });
+  }
+}
+
+async function saveImpossibleBackup(action, comboKey, extra = {}) {
+  const backupId = createId();
+
+  await set(ref(db, `impossibleComboBackups/${backupId}`), {
+    action,
+    comboKey,
+    createdAt: Date.now(),
+    createdBy: playerName || "Admin",
+    rolledBackAt: null,
+    ...extra,
+  });
+
+  return backupId;
+}
+
+async function approveImpossibleReport(report) {
+  if (!report?.key) return;
+
+  const nowTs = Date.now();
+  const comboBefore = approvedImpossibleCombos?.[report.key] || null;
+
+  try {
+    await saveImpossibleBackup("approve", report.key, {
+      reportBefore: report,
+      comboBefore,
+    });
+
+    await set(ref(db, `impossibleCombos/${report.key}`), {
+      question: report.question,
+      letter: report.letter,
+      approvedAt: nowTs,
+      approvedBy: playerName || "Admin",
+    });
+
+    await update(ref(db, `impossibleComboReports/${report.key}`), {
+      status: "approved",
+      reviewedAt: nowTs,
+      reviewedBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon rapportage niet goedkeuren", error);
+    alert("Kon rapportage niet goedkeuren. Controleer je verbinding of Firebase regels.");
+  }
+}
+
+async function rejectImpossibleReport(report) {
+  if (!report?.key) return;
+
+  try {
+    await saveImpossibleBackup("reject", report.key, {
+      reportBefore: report,
+    });
+
+    await update(ref(db, `impossibleComboReports/${report.key}`), {
+      status: "rejected",
+      reviewedAt: Date.now(),
+      reviewedBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon rapportage niet afwijzen", error);
+    alert("Kon rapportage niet afwijzen. Controleer je verbinding of Firebase regels.");
+  }
+}
+
+async function removeApprovedImpossibleCombo(combo) {
+  if (!combo?.key) return;
+  if (!confirm("Actieve onmogelijke combinatie verwijderen?")) return;
+
+  try {
+    await saveImpossibleBackup("remove-active", combo.key, {
+      comboBefore: combo,
+    });
+
+    await remove(ref(db, `impossibleCombos/${combo.key}`));
+  } catch (error) {
+    console.error("Kon actieve combinatie niet verwijderen", error);
+    alert("Kon actieve combinatie niet verwijderen. Controleer je verbinding of Firebase regels.");
+  }
+}
+
+async function rollbackImpossibleBackup(backup) {
+  if (!backup?.key || !backup?.comboKey || backup.rolledBackAt) return;
+  if (!confirm("Deze beheeractie terugdraaien?")) return;
+
+  try {
+    if (backup.action === "approve") {
+      if (backup.comboBefore) {
+        await set(ref(db, `impossibleCombos/${backup.comboKey}`), backup.comboBefore);
+      } else {
+        await remove(ref(db, `impossibleCombos/${backup.comboKey}`));
+      }
+
+      if (backup.reportBefore) {
+        const { key: _key, ...reportWithoutKey } = backup.reportBefore;
+        await set(ref(db, `impossibleComboReports/${backup.comboKey}`), reportWithoutKey);
+      }
+    }
+
+    if (backup.action === "reject" && backup.reportBefore) {
+      const { key: _key, ...reportWithoutKey } = backup.reportBefore;
+      await set(ref(db, `impossibleComboReports/${backup.comboKey}`), reportWithoutKey);
+    }
+
+    if (backup.action === "remove-active" && backup.comboBefore) {
+      const { key: _key, ...comboWithoutKey } = backup.comboBefore;
+      await set(ref(db, `impossibleCombos/${backup.comboKey}`), comboWithoutKey);
+    }
+
+    await update(ref(db, `impossibleComboBackups/${backup.key}`), {
+      rolledBackAt: Date.now(),
+      rolledBackBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon backup niet terugdraaien", error);
+    alert("Kon backup niet terugdraaien. Controleer je verbinding of Firebase regels.");
+  }
 }
 
 
@@ -1076,13 +825,7 @@ function renderOfflineMultiSetup() {
   const [leaderOpen, setLeaderOpen] = useState(false);
   const [leaderData, setLeaderData] = useState(null);
 
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(vragen));
-    } catch (err) {
-      console.warn("Kon vragen niet opslaan in localStorage", err);
-    }
-  }, [vragen]);
+
 
   /* presence per room */
   useEffect(() => {
@@ -1090,7 +833,7 @@ function renderOfflineMultiSetup() {
     const connectedRef = ref(db, ".info/connected");
     const unsub = onValue(connectedRef, snap => {
       if (snap.val() === true) {
-        const connId = crypto.randomUUID();
+        const connId = createId();
         connIdRef.current = connId;
         const myConnRef = ref(db, `rooms/${roomCode}/presence/${playerId}/${connId}`);
         set(myConnRef, serverTimestamp());
@@ -1169,7 +912,7 @@ function attachRoomListener(code) {
 
 
   function getSeedQuestions() {
-    return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+    return selectedGameQuestions.map((question) => question.tekst).filter(Boolean);
   }
 
   async function createRoom({ autoStart = false, solo = false } = {}) {
@@ -1184,6 +927,7 @@ function attachRoomListener(code) {
 
     const code = makeRoomCode();
     const qs = getSeedQuestions();
+    if (!qs.length) { alert("Geen actieve vragen beschikbaar voor deze categorie."); return; }
     const order = shuffle([...Array(qs.length).keys()]);
     const playersOrder = [playerId];
 
@@ -2046,6 +1790,64 @@ const matchStartedAt = isOnlineRoom
     ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
     : 0;
 
+  const dialogOpen =
+    leaderOpen ||
+    settingsOpen ||
+    roomBrowserOpen ||
+    profileOpen ||
+    reportReviewOpen ||
+    !!reportDialog ||
+    !!offlineResult ||
+    offmSetupOpen ||
+    wordCheckOpen;
+
+  useBodyScrollLock(dialogOpen);
+
+  const offlineSoloQuestion = offlineSolo
+    ? (() => {
+      const qs = getSeedQuestions();
+      const qIdx = offOrder[offIndex] ?? 0;
+      return qs[qIdx] ?? "";
+    })()
+    : "";
+
+  const offlineMultiQuestion = offlineMulti && !offmInCooldown
+    ? (() => {
+      const qs = getSeedQuestions();
+      const qIdx = offmOrder[offmIndex] ?? 0;
+      return qs[qIdx] ?? "";
+    })()
+    : "";
+
+  const currentReportQuestion = offlineSolo
+    ? offlineSoloQuestion
+    : (offlineMulti ? offlineMultiQuestion : (isOnlineRoom && room?.started ? onlineQuestion : ""));
+
+  const currentReportLetter = normalizeComboLetter(
+    offlineSolo
+      ? offLastLetter
+      : (offlineMulti ? offmLastLetter : (isOnlineRoom && room?.started ? room?.lastLetter : ""))
+  );
+
+  const currentComboApproved = isImpossibleComboApproved(
+    approvedImpossibleCombos,
+    currentReportQuestion,
+    currentReportLetter
+  );
+
+  const pendingReports = Object.entries(impossibleReports || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .filter((report) => report.status === "pending")
+    .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
+
+  const activeImpossibleCombos = Object.entries(approvedImpossibleCombos || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => (b.approvedAt || 0) - (a.approvedAt || 0));
+
+  const impossibleBackups = Object.entries(impossibleComboBackups || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
 function onLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
   if (val.length === 1) {
@@ -2070,215 +1872,18 @@ function onLetterChanged(e) {
     navigator.clipboard.writeText(roomCode).then(() => alert("Room code gekopieerd."));
   }
 
-  function voegVragenToe() {
-    const items = splitInput(invoer);
-    if (!items.length) return;
-    setVragen((prev) => [
-      ...prev,
-      ...items.map((tekst) => ({ id: crypto.randomUUID(), tekst }))
-    ]);
-    setInvoer("");
-  }
-  function verwijderVraag(id) {
-    setVragen((prev) => prev.filter((v) => v.id !== id));
-  }
-  async function kopieerAlle() {
-    const tekst = vragen.map((v) => v.tekst).join(",\n");
-    try {
-      await navigator.clipboard.writeText(tekst);
-      alert("Alle vragen zijn gekopieerd.");
-    } catch {
-      const ta = document.createElement("textarea");
-      ta.value = tekst;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
-      alert("Alle vragen zijn gekopieerd.");
-    }
-  }
-  function resetStandaardVragen() {
-    const seeded = DEFAULT_VRAGEN.map((t) => ({ id: crypto.randomUUID(), tekst: String(t) }));
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(seeded));
-    } catch (err) {
-      console.warn("Kon standaardvragen niet opslaan", err);
-    }
-    setVragen(seeded);
-    alert("Standaard vragen opnieuw geladen.");
-  }
 
-  function renderRoomBrowser() {
-    if (!roomBrowserOpen) return null;
-    return (
-      <div className="overlay" onClick={() => setRoomBrowserOpen(false)}>
-        <div className="card" onClick={(e) => e.stopPropagation()}>
-          <h2 style={{ marginTop: 0, marginBottom: 6 }}>🔎 Beschikbare rooms</h2>
-          <p className="muted" style={{ marginTop: 0 }}>Klik op een room om direct mee te doen.</p>
-          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-            <Button onClick={loadAvailableRooms} disabled={roomListLoading}>🔄 Vernieuwen</Button>
-            <Button variant="alt" onClick={() => setRoomBrowserOpen(false)}>Sluiten</Button>
-          </div>
-          {roomListLoading ? (
-            <div className="muted">Bezig met laden…</div>
-          ) : availableRooms.length === 0 ? (
-            <div className="muted">Geen actieve rooms gevonden.</div>
-          ) : (
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Room</th>
-                  <th>Status</th>
-                  <th>Spelers</th>
-                  <th>Online</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {availableRooms.map((r) => (
-                  <tr key={r.code}>
-                    <td>
-                      <b>{r.code}</b>
-                      <div className="muted">Host: {r.hostName}</div>
-                    </td>
-                    <td>{r.started ? "Bezig" : "In lobby"}</td>
-                    <td>{r.playerCount}</td>
-                    <td>{r.onlineNames && r.onlineNames.length > 0 ? r.onlineNames.join(", ") : "—"}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <Button onClick={() => joinRoom(r.code)}>Join</Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    );
-  }
 
-  /* Profiel (match history + highscore) */
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [profile, setProfile] = useState(null);
   useEffect(() => {
     if (!playerId) return;
     const profRef = ref(db, `profiles/${playerId}`);
     const off = onValue(profRef, snap => setProfile(snap.val() || null));
     return () => off();
   }, [playerId]);
-function renderBottomScoreBar() {
-  if (isOnlineRoom && room?.started && !room?.solo && room?.players) {
-    const ids = (Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players))
-      .filter((id) => room.players && room.players[id]);
 
-    if (!ids.length) return null;
-
-    return (
-      <div className="scorebar">
-        {ids.map((id) => {
-          const name = room.participants?.[id]?.name || room.players?.[id]?.name || "Speler";
-          const score = room.scores?.[id] ?? 0;
-          const jail = room.jail?.[id] ?? 0;
-          const active = room.turn === id;
-
-          return (
-            <div
-              key={id}
-              className={`scorechip${active ? " scorechip-active" : ""}`}
-              title={jail > 0 ? `Jilla: ${jail}x` : ""}
-            >
-              <b>{name}</b>
-              <span>{score}</span>
-              {jail > 0 ? <span>🔒x{jail}</span> : null}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  return null;
-}
-  function renderProfileOverlay() {
-    if (!profileOpen) return null;
-    const matches = profile?.matches ? Object.values(profile.matches) : [];
-    matches.sort((a, b) => (b.endedAt || 0) - (a.endedAt || 0));
-    const hs = profile?.localHighscore || null;
-    const fmt = (ts) => { try { return new Date(ts).toLocaleString(); } catch { return "—"; } };
-    return (
-      <div className="overlay" onClick={() => setProfileOpen(false)}>
-        <div className="card" onClick={(e) => e.stopPropagation()}>
-          <h2 style={{ marginTop: 0, marginBottom: 6 }}>📜 Profiel</h2>
-          <div style={{ marginBottom: 12 }}>
-            <h3 style={{ margin: "8px 0" }}>🏅 Highscore</h3>
-            {hs ? (
-              <div className="badge" style={{ display: "inline-flex", gap: 10 }}>
-                <span><b>Adjusted:</b> {Number(hs.bestAdjusted || 0).toFixed(2)}</span>
-                <span><b>Raw:</b> {hs.bestRaw}</span>
-                {hs.bestGame && (
-                  <>
-                    <span><b>Datum:</b> {fmt(hs.bestGame.endedAt)}</span>
-                    {hs.bestGame.placement && (
-                      <span><b>Resultaat:</b> {hs.bestGame.placement === 1 ? "Gewonnen" : `${hs.bestGame.placement}e`}</span>
-                    )}
-                  </>
-                )}
-              </div>
-            ) : (
-              <div className="muted">Nog geen highscore opgeslagen.</div>
-            )}
-          </div>
-          <h3 style={{ margin: "8px 0" }}>📅 Match history</h3>
-          {matches.length === 0 ? (
-            <div className="muted">Nog geen gespeelde potjes opgeslagen.</div>
-          ) : (
-            <div style={{ maxHeight: "60vh", overflow: "auto", borderRadius: 12 }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Datum</th>
-                    <th>Resultaat</th>
-                    <th>Punten</th>
-                    <th>Gem. tijd / vraag</th>
-                    <th>Jilla</th>
-                    <th>Dubble pof</th>
-                    <th>Deelnemers</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {matches.map(m => {
-                    const you = m.you || { score: 0, answered: 0, adjusted: 0, avgMs: null, jilla: 0, dpf: 0 };
-                    const placement = m.placement;
-                    const result = placement === 1 ? "Gewonnen" : (placement ? ordinal(placement) : "—");
-                    const avgSecs = you.avgMs == null ? "—" : `${(you.avgMs / 1000).toFixed(1)}s`;
-                    const names = Array.isArray(m.players) ? m.players.map(p => p.name).join(", ") : "—";
-                    return (
-                      <tr key={`${m.roomCode || "room"}-${m.endedAt || Math.random()}`}>
-                        <td>{fmt(m.endedAt)}</td>
-                        <td>{result}</td>
-                        <td>{you.score}{you.answered ? ` / ${you.answered}` : ""}</td>
-                        <td>{avgSecs}</td>
-                        <td>{you.jilla ?? 0}</td>
-                        <td>{you.dpf ?? 0}</td>
-                        <td>{names}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-            <Button variant="alt" onClick={() => setProfileOpen(false)}>Sluiten</Button>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <>
-      <GlobalStyle />
       <div style={styles.wrap}>
         <header style={styles.header}>
           <h1 style={styles.h1}>PimPamPof</h1>
@@ -2293,35 +1898,6 @@ function renderBottomScoreBar() {
               />
             )}
 
-            {!isOnlineRoom && !offlineSolo && !offlineMulti && (
-              <>
-                {!online ? (
-                  <>
-                    <span className="badge">alleen solo</span>
-                    <Button onClick={startOffline}>Solo Mode</Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>
-                      Room aanmaken
-                    </Button>
-                    <Button variant="alt" onClick={openRoomBrowser}>Rooms bekijken</Button>
-                    <input
-                      style={styles.input}
-                      placeholder="Room code"
-                      value={roomCodeInput}
-                      onChange={e => setRoomCodeInput(e.target.value.toUpperCase())}
-                    />
-                    <Button variant="alt" onClick={joinRoom}>Join</Button>
-                    <Button onClick={startOffline}>Solo (offline)</Button>
-                    <Button onClick={openOfflineMultiSetup}>Offline multiplayer</Button>
-                    <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">
-                      ↔️ Naar Dierenspel
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
 
             {offlineSolo && (
               <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
@@ -2354,6 +1930,7 @@ function renderBottomScoreBar() {
               </>
             )}
 
+            <Button variant="alt" onClick={() => setSettingsOpen(true)}>⚙️ Instellingen</Button>
             <Button variant="alt" onClick={() => setProfileOpen(true)}>📜 Profiel</Button>
           </Row>
 
@@ -2390,60 +1967,50 @@ function renderBottomScoreBar() {
             </div>
           )}
         </header>
+        {!isOnlineRoom && !offlineSolo && !offlineMulti && (
+          <MainMenuPanel
+            online={online}
+            roomCodeInput={roomCodeInput}
+            onRoomCodeInputChange={setRoomCodeInput}
+            onCreateRoom={() => createRoom({ autoStart: false, solo: false })}
+            onBrowseRooms={openRoomBrowser}
+            onJoinRoom={joinRoom}
+            onStartSolo={startOffline}
+            onStartOfflineMulti={openOfflineMultiSetup}
+            onOpenDieren={() => (window.location.href = URL_DIEREN)}
+          />
+        )}
+
         {!offlineSolo && !offlineMulti && !room?.started && (
-  <Section title={`Wat is nieuw (${WHATS_NEW.updatedAtLabel})`}>
-    <Row>
-      <span className="muted" style={{ maxWidth: 520, textAlign: "left" }}>
-        Updates en veranderingen in de game.
-      </span>
-      <Button variant="alt" onClick={() => setWhatsOpen(o => !o)}>
-        {whatsOpen ? "Verberg" : "Toon"}
-      </Button>
-    </Row>
+          <WhatsNewPanel
+            whatsNew={WHATS_NEW}
+            isOpen={whatsOpen}
+            onToggle={() => setWhatsOpen((open) => !open)}
+          />
+        )}
 
-    {whatsOpen && (
-      <ul style={{ margin: "10px 0 0 18px", textAlign: "left", lineHeight: 1.55 }}>
-        {WHATS_NEW.items.map((t, i) => (
-          <li key={i} style={{ marginBottom: 6 }}>{t}</li>
-        ))}
-      </ul>
-    )}
-  </Section>
-)}
-
-          {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
-          <>
-            <Section title="Nieuwe vragen (gescheiden met , of enter)">
-              <TextArea
-                value={invoer}
-                onChange={setInvoer}
-              />
-              <div style={{ marginTop: 12 }}>
-                <Row>
-                  <Button onClick={voegVragenToe}>Voeg vragen toe</Button>
-                  <Button variant="alt" onClick={kopieerAlle}>Kopieer alle vragen</Button>
-                  <Button variant="stop" onClick={resetStandaardVragen}>
-                    Reset naar standaard
-                  </Button>
-                </Row>
-              </div>
-            </Section>
-
-            <Section title="Huidige vragen">
-              {vragen.length === 0 ? (
-                <p style={{ opacity: 0.7 }}>Nog geen vragen toegevoegd.</p>
-              ) : (
-                <ul style={styles.list}>
-                  {vragen.map((v) => (
-                    <li key={v.id} style={styles.li}>
-                      <div style={styles.liText}>{v.tekst}</div>
-                      <DangerButton onClick={() => verwijderVraag(v.id)}>❌</DangerButton>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Section>
-          </>
+        {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
+          <QuestionManager
+            input={invoer}
+            onInputChange={setInvoer}
+            questions={visibleQuestions}
+            totalQuestions={vragen.length}
+            activeQuestions={activeQuestions}
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onSelectedCategoryChange={setSelectedCategory}
+            newQuestionCategory={newQuestionCategory}
+            onNewQuestionCategoryChange={setNewQuestionCategory}
+            newCategoryName={newCategoryName}
+            onNewCategoryNameChange={setNewCategoryName}
+            onAddCategory={voegCategorieToe}
+            onAddQuestions={voegVragenToe}
+            onCopyAll={kopieerAlle}
+            onResetDefault={resetStandaardVragen}
+            onRemoveQuestion={verwijderVraag}
+            onToggleQuestionActive={toggleVraagActief}
+            onChangeQuestionCategory={veranderVraagCategorie}
+          />
         )}
 
         {offlineSolo && (
@@ -2474,7 +2041,7 @@ function renderBottomScoreBar() {
               </div>
               <div style={{ fontSize: 22, minHeight: "3rem" }}>
                 {(() => {
-                  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+                  const qs = getSeedQuestions();
                   const qIdx = offOrder[offIndex] ?? 0;
                   return qs[qIdx] ?? "Vraag komt hier...";
                 })()}
@@ -2492,6 +2059,22 @@ function renderBottomScoreBar() {
               <div style={{ marginTop: 6 }}>
   <Button variant="stop" onClick={offlineJilla}>Jilla (vraag overslaan)</Button>
 </div>
+
+              {currentComboApproved && (
+                <>
+                  <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                    Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                  </div>
+                  <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+                </>
+              )}
+
+              <Button
+                variant="alt"
+                onClick={() => openImpossibleReport(offlineSoloQuestion, offLastLetter, "offline-solo")}
+              >
+                Rapporteer combinatie
+              </Button>
 
             </div>
           </Section>
@@ -2562,6 +2145,24 @@ function renderBottomScoreBar() {
           <div style={{ marginTop: 6 }}>
             <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
           </div>
+        )}
+
+        {!offmInCooldown && currentComboApproved && (
+          <>
+            <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+              Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+            </div>
+            <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+          </>
+        )}
+
+        {!offmInCooldown && (
+          <Button
+            variant="alt"
+            onClick={() => openImpossibleReport(offlineMultiQuestion, offmLastLetter, "offline-multi")}
+          >
+            Rapporteer combinatie
+          </Button>
         )}
       </div>
     </Section>
@@ -2707,6 +2308,24 @@ function renderBottomScoreBar() {
                 </div>
               )}
 
+              {isMyTurn && !inCooldown && !room?.paused && currentComboApproved && (
+                <>
+                  <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                    Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                  </div>
+                  <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+                </>
+              )}
+
+              {isMyTurn && !inCooldown && !room?.paused && (
+                <Button
+                  variant="alt"
+                  onClick={() => openImpossibleReport(onlineQuestion, room?.lastLetter, "online")}
+                >
+                  Rapporteer combinatie
+                </Button>
+              )}
+
               {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
             </div>
           </Section>
@@ -2784,60 +2403,89 @@ function renderBottomScoreBar() {
 </footer>
 
       </div>
-      {renderBottomScoreBar()}
-      {pofShow && (
-        <div className="pof-toast">
-          <div className="pof-bubble">{pofText}</div>
-        </div>
-      )}
+      <BottomScoreBar room={isOnlineRoom ? room : null} />
+      <PofToast show={pofShow} text={pofText} />
+      <ScoreToast toast={scoreToast} />
+      <LeaderboardOverlay
+        open={leaderOpen}
+        data={leaderData}
+        onClose={() => setLeaderOpen(false)}
+      />
 
-      {scoreToast.show && (
-        <div className="score-toast">
-          <div className={`score-bubble ${scoreToast.type === "minus" ? "score-minus" : "score-plus"}`}>
-            {scoreToast.text}
-          </div>
-        </div>
-      )}
-
-      {leaderOpen && leaderData && (
-        <div className="overlay" onClick={() => setLeaderOpen(false)}>
-          <div className="card" onClick={e => e.stopPropagation()}>
-            <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Leaderboard</h2>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Rang</th>
-                  <th>Speler</th>
-                  <th>Punten</th>
-                  <th>Gem. tijd / vraag</th>
-                  <th>Jilla</th>
-                  <th>Dubble pof</th>
-                </tr>
-              </thead>
-              <tbody>
-                {leaderData.map((r, i) => (
-                  <tr key={r.id}>
-                    <td>{ordinal(i + 1)}</td>
-                    <td>{r.name}</td>
-                    <td>{r.score}</td>
-                    <td>{r.avgMs == null ? "—" : `${(r.avgMs / 1000).toFixed(1)}s`}</td>
-                    <td>{r.jilla}</td>
-                    <td>{r.dpf}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 12 }}>
-              <Button variant="alt" onClick={() => setLeaderOpen(false)}>Sluiten</Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {renderRoomBrowser()}
-      {renderProfileOverlay()}
-      {renderOfflineMultiSetup()}
-      {renderWordCheckOverlay()}
+      <SettingsOverlay
+        open={settingsOpen}
+        theme={theme}
+        reportCount={pendingReports.length}
+        onThemeChange={setTheme}
+        onOpenReports={() => {
+          setSettingsOpen(false);
+          setReportReviewOpen(true);
+        }}
+        onClose={() => setSettingsOpen(false)}
+      />
+      <RoomBrowser
+        open={roomBrowserOpen}
+        onClose={() => setRoomBrowserOpen(false)}
+        onRefresh={loadAvailableRooms}
+        loading={roomListLoading}
+        rooms={availableRooms}
+        onJoinRoom={joinRoom}
+      />
+      <ProfileOverlay
+        open={profileOpen}
+        profile={profile}
+        onClose={() => setProfileOpen(false)}
+      />
+      <OfflineResultOverlay
+        result={offlineResult}
+        onClose={() => setOfflineResult(null)}
+      />
+      <OfflineMultiSetup
+        open={offmSetupOpen}
+        playerCount={offmPlayerCount}
+        names={offmNames}
+        onPlayerCountChange={setOffmPlayerCount}
+        onNamesChange={setOffmNames}
+        onStart={startOfflineMultiFromSetup}
+        onClose={() => setOffmSetupOpen(false)}
+      />
+      <ImpossibleComboReportOverlay
+        open={!!reportDialog}
+        report={reportDialog}
+        alreadyApproved={isImpossibleComboApproved(approvedImpossibleCombos, reportDialog?.question, reportDialog?.letter)}
+        busy={reportBusy}
+        onConfirm={submitImpossibleReport}
+        onClose={() => setReportDialog(null)}
+      />
+      <ImpossibleReportsReviewOverlay
+        open={reportReviewOpen}
+        reports={pendingReports}
+        activeCombos={activeImpossibleCombos}
+        backups={impossibleBackups}
+        onApprove={approveImpossibleReport}
+        onReject={rejectImpossibleReport}
+        onRemoveActive={removeApprovedImpossibleCombo}
+        onRollback={rollbackImpossibleBackup}
+        onClose={() => setReportReviewOpen(false)}
+      />
+      <WordCheckOverlay
+        open={wordCheckOpen}
+        word={wordCheckWord}
+        onWordChange={setWordCheckWord}
+        busy={wordCheckBusy}
+        error={wordCheckError}
+        result={wordCheckResult}
+        preferAi={wordCheckPreferAi}
+        onPreferAiChange={setWordCheckPreferAi}
+        requiredLetter={normalizeLetter(
+          offlineSolo ? offLastLetter :
+          offlineMulti ? offmLastLetter :
+          (isOnlineRoom && room?.started ? room?.lastLetter : "?")
+        )}
+        online={online}
+        onRun={runWordCheck}
+        onClose={closeWordCheck}
+      />
     </>
   );
 }
