@@ -79,9 +79,9 @@ export function TutorialOverlay({ open, onClose }) {
         <div className="settings-section">
           <h3 style={{ margin: "0 0 8px 0" }}>Onmogelijke combinaties</h3>
           <p style={{ margin: 0, textAlign: "left", lineHeight: 1.6 }}>
-            Soms lijkt een vraag met een bepaalde letter bijna onmogelijk.
+            Soms is een vraag met een bepaalde letter onmogelijk.
             Dan kun je de combinatie rapporteren. Als de combinatie wordt goedgekeurd,
-            krijgen spelers later een waarschuwing en kunnen ze direct een nieuwe vraag pakken.
+            krijgen spelers later een waarschuwing en kunnen ze direct zonder straf een nieuwe vraag krijgen.
           </p>
         </div>
       </div>
