@@ -2418,7 +2418,7 @@ function onLetterChanged(e) {
       <SettingsOverlay
         open={settingsOpen}
         theme={theme}
-        reportCount={pendingImpossibleComboReports.length}
+        reportCount={activeImpossibleCombos.length}
         onThemeChange={setTheme}
         onOpenReports={() => {
           setSettingsOpen(false);
