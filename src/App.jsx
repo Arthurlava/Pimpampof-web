@@ -32,7 +32,7 @@ import { Section } from "./components/common/Section";
 import { useOnline } from "./hooks/useOnline";
 import { useQuestions } from "./hooks/useQuestions";
 import { WhatsNewPanel } from "./components/home/WhatsNewPanel";
-import { ThemePanel } from "./components/home/ThemePanel";
+import { SettingsOverlay } from "./components/home/SettingsOverlay";
 import { MainMenuPanel } from "./components/home/MainMenuPanel";
 import { QuestionManager } from "./components/questions/QuestionManager";
 import { RoomBrowser } from "./components/online/RoomBrowser";
@@ -89,6 +89,7 @@ export default function PimPamPofWeb() {
   useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
 
   const [theme, setTheme] = useState(() => localStorage.getItem("ppp.theme") || "green");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [offlineResult, setOfflineResult] = useState(null);
 
   useEffect(() => {
@@ -1599,6 +1600,7 @@ function onLetterChanged(e) {
               </>
             )}
 
+            <Button variant="alt" onClick={() => setSettingsOpen(true)}>⚙️ Instellingen</Button>
             <Button variant="alt" onClick={() => setProfileOpen(true)}>📜 Profiel</Button>
           </Row>
 
@@ -1655,10 +1657,6 @@ function onLetterChanged(e) {
             onStartOfflineMulti={openOfflineMultiSetup}
             onOpenDieren={() => (window.location.href = URL_DIEREN)}
           />
-        )}
-
-        {!offlineSolo && !offlineMulti && !room?.started && (
-          <ThemePanel theme={theme} onThemeChange={setTheme} />
         )}
 
         {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
@@ -2032,6 +2030,12 @@ function onLetterChanged(e) {
         onClose={() => setLeaderOpen(false)}
       />
 
+      <SettingsOverlay
+        open={settingsOpen}
+        theme={theme}
+        onThemeChange={setTheme}
+        onClose={() => setSettingsOpen(false)}
+      />
       <RoomBrowser
         open={roomBrowserOpen}
         onClose={() => setRoomBrowserOpen(false)}

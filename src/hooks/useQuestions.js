@@ -92,16 +92,17 @@ export function useQuestions() {
     [vragen]
   );
 
-  function voegVragenToe() {
+  function voegVragenToe(categoryOverride) {
     const items = splitInput(invoer);
     if (!items.length) return;
 
-    const category = cleanCategory(newQuestionCategory);
+    const category = cleanCategory(categoryOverride || newQuestionCategory);
 
     setVragen((prev) => [
       ...prev,
       ...items.map((tekst) => ({ id: createId(), tekst, active: true, category })),
     ]);
+    setNewQuestionCategory(category);
     setInvoer("");
   }
 
