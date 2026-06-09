@@ -59,7 +59,7 @@ export function MainMenuPanel({
 
         <MenuCard
           title="Online room"
-          text={online ? "Maak een room of join met een roomcode." : "Online rooms werken niet als je offline bent."}
+          text={online ? "Maak een room of join met een roomcode of via Join rooms." : "Online rooms werken niet als je offline bent."}
           badge={online ? "Online" : "Offline"}
         >
           {online ? (
@@ -85,7 +85,7 @@ export function MainMenuPanel({
 
         <MenuCard
           title="Dierenspel"
-          text="Open het andere spel in dezelfde stijl, alleen dan met een vaste vraag: Noem een dier dat bignt met de letter waar het vorige dier op eindigde."
+          text="Open het andere spel in dezelfde stijl, alleen dan met een vaste vraag: Noem een dier dat begint met de letter waar het vorige dier op eindigde."
           badge="Extra"
         >
           <Button onClick={onOpenDieren}>Naar Dierenspel</Button>
