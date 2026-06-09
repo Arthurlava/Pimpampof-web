@@ -137,8 +137,8 @@ body {
     .score-plus { background: linear-gradient(90deg, #22c55e, #16a34a); color: #041507; }
     .score-minus { background: linear-gradient(90deg, #ef4444, #dc2626); color: #180404; }
 
-    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; }
-    .card { width: min(92vw, 720px); max-height: 88vh; overflow: auto; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+    .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; z-index: 9998; overscroll-behavior: contain; }
+    .card { width: min(92vw, 720px); max-height: 88vh; overflow: auto; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 16px; padding: 16px; backdrop-filter: blur(6px); box-shadow: 0 20px 60px rgba(0,0,0,.35); overscroll-behavior: contain; }
 
     .table { width:100%; border-collapse: collapse; }
     .table th, .table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,.12); text-align: left; }
@@ -371,6 +371,28 @@ body {
   flex-wrap: wrap;
 }
 
+.question-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.question-text {
+  min-width: 0;
+  line-height: 1.4;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.question-actions {
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
 .question-add-panel {
   padding: 12px;
   border-radius: 14px;
@@ -407,12 +429,16 @@ body {
     align-items: stretch;
   }
 
-  .question-toolbar-actions,
-  .question-actions {
+  .question-toolbar-actions {
     justify-content: stretch;
   }
 
-  .question-actions > * {
-    flex: 1 1 auto;
+  .question-row {
+    grid-template-columns: 1fr;
+  }
+
+  .question-actions {
+    justify-content: flex-end;
+    min-width: 0;
   }
 }

@@ -30,6 +30,7 @@ import { Row } from "./components/common/Row";
 import { Section } from "./components/common/Section";
 import { useOnline } from "./hooks/useOnline";
 import { useQuestions } from "./hooks/useQuestions";
+import { useBodyScrollLock } from "./hooks/useBodyScrollLock";
 import { WhatsNewPanel } from "./components/home/WhatsNewPanel";
 import { SettingsOverlay } from "./components/home/SettingsOverlay";
 import { MainMenuPanel } from "./components/home/MainMenuPanel";
@@ -1514,6 +1515,17 @@ const matchStartedAt = isOnlineRoom
   const matchDurationMs = matchStartedAt
     ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
     : 0;
+
+  const dialogOpen =
+    leaderOpen ||
+    settingsOpen ||
+    roomBrowserOpen ||
+    profileOpen ||
+    !!offlineResult ||
+    offmSetupOpen ||
+    wordCheckOpen;
+
+  useBodyScrollLock(dialogOpen);
 
 function onLetterChanged(e) {
   const val = normalizeLetter(e.target.value);

@@ -129,12 +129,10 @@ export function QuestionManager({
           {questions.map((question) => (
             <li
               key={question.id}
-              style={{
-                ...styles.li,
-                opacity: question.active === false ? 0.55 : 1,
-              }}
+              className="question-row"
+              style={{ opacity: question.active === false ? 0.55 : 1 }}
             >
-              <div style={styles.liText}>{question.tekst}</div>
+              <div className="question-text">{question.tekst}</div>
 
               <div className="question-actions">
                 {realCategories.length > 0 && (
