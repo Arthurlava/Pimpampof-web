@@ -7,7 +7,7 @@ const THEMES = [
   { id: "purple", label: "Paars" },
 ];
 
-export function SettingsOverlay({ open, theme, onThemeChange, onClose }) {
+export function SettingsOverlay({ open, theme, reportCount = 0, onThemeChange, onOpenReports, onClose }) {
   if (!open) return null;
 
   return (
@@ -21,6 +21,16 @@ export function SettingsOverlay({ open, theme, onThemeChange, onClose }) {
             </p>
           </div>
           <Button variant="alt" onClick={onClose}>Sluiten</Button>
+        </div>
+
+        <div className="settings-section">
+          <h3 style={{ margin: "0 0 10px 0" }}>Rapportages</h3>
+          <p className="muted" style={{ margin: "0 0 10px 0" }}>
+            Bekijk vraag + letter combinaties die spelers als onmogelijk hebben gemeld.
+          </p>
+          <Button variant="alt" onClick={onOpenReports}>
+            Bekijk rapportages{reportCount > 0 ? ` (${reportCount})` : ""}
+          </Button>
         </div>
 
         <div className="settings-section">

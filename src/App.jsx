@@ -44,6 +44,8 @@ import { OfflineResultOverlay } from "./components/offline/OfflineResultOverlay"
 import { LeaderboardOverlay } from "./components/feedback/LeaderboardOverlay";
 import { PofToast } from "./components/feedback/PofToast";
 import { ScoreToast } from "./components/feedback/ScoreToast";
+import { ImpossibleComboReportOverlay } from "./components/reports/ImpossibleComboReportOverlay";
+import { ImpossibleReportsReviewOverlay } from "./components/reports/ImpossibleReportsReviewOverlay";
 import {
   calcPoints,
   canLeaveRoom,
@@ -60,6 +62,12 @@ import {
   checkWordViaNlWiktionary,
   normalizeWordForCheck,
 } from "./utils/wordCheck";
+import {
+  isImpossibleComboApproved,
+  makeImpossibleComboKey,
+  normalizeComboLetter,
+  normalizeComboQuestion,
+} from "./utils/impossibleCombos";
 
 /* ---------- App ---------- */
 export default function PimPamPofWeb() {
@@ -94,6 +102,10 @@ export default function PimPamPofWeb() {
   const [offlineResult, setOfflineResult] = useState(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
+  const [reportDialog, setReportDialog] = useState(null);
+  const [reportReviewOpen, setReportReviewOpen] = useState(false);
+  const [impossibleReports, setImpossibleReports] = useState({});
+  const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -114,6 +126,24 @@ export default function PimPamPofWeb() {
   }, []);
 
   const online = useOnline();
+
+  useEffect(() => {
+    const reportsRef = ref(db, "impossibleComboReports");
+    const unsubscribe = onValue(reportsRef, (snap) => {
+      setImpossibleReports(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const approvedRef = ref(db, "impossibleCombos");
+    const unsubscribe = onValue(approvedRef, (snap) => {
+      setApprovedImpossibleCombos(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
 const [whatsOpen, setWhatsOpen] = useState(() => {
   try { return localStorage.getItem(WHATS_NEW_COLLAPSE_KEY) !== "1"; } catch { return true; }
 });
@@ -510,7 +540,86 @@ async function runWordCheck() {
   }
 }
 
+function openImpossibleReport(question, letter, mode) {
+  const cleanQuestion = normalizeComboQuestion(question);
+  const cleanLetter = normalizeComboLetter(letter);
 
+  if (!cleanQuestion || !cleanLetter || cleanLetter === "?") {
+    alert("Er is geen geldige vraag + letter combinatie om te rapporteren.");
+    return;
+  }
+
+  setReportDialog({ question: cleanQuestion, letter: cleanLetter, mode });
+}
+
+async function submitImpossibleReport() {
+  if (!reportDialog) return;
+
+  const key = makeImpossibleComboKey(reportDialog.question, reportDialog.letter);
+  const reportRef = ref(db, `impossibleComboReports/${key}`);
+
+  await runTransaction(reportRef, (current) => {
+    const nowTs = Date.now();
+
+    if (!current) {
+      return {
+        question: reportDialog.question,
+        letter: reportDialog.letter,
+        mode: reportDialog.mode || "unknown",
+        status: "pending",
+        count: 1,
+        createdAt: nowTs,
+        updatedAt: nowTs,
+        reportedBy: playerId || null,
+        reportedByName: playerName || "Speler",
+      };
+    }
+
+    if (current.status === "approved") return current;
+
+    return {
+      ...current,
+      question: current.question || reportDialog.question,
+      letter: current.letter || reportDialog.letter,
+      mode: reportDialog.mode || current.mode || "unknown",
+      status: "pending",
+      count: (current.count || 0) + 1,
+      updatedAt: nowTs,
+      reportedBy: playerId || current.reportedBy || null,
+      reportedByName: playerName || current.reportedByName || "Speler",
+    };
+  });
+
+  setReportDialog(null);
+  triggerScoreToast("Rapportage opgeslagen", "plus");
+}
+
+async function approveImpossibleReport(report) {
+  if (!report?.key) return;
+
+  await set(ref(db, `impossibleCombos/${report.key}`), {
+    question: report.question,
+    letter: report.letter,
+    approvedAt: Date.now(),
+    approvedBy: playerName || "Admin",
+  });
+
+  await update(ref(db, `impossibleComboReports/${report.key}`), {
+    status: "approved",
+    reviewedAt: Date.now(),
+    reviewedBy: playerName || "Admin",
+  });
+}
+
+async function rejectImpossibleReport(report) {
+  if (!report?.key) return;
+
+  await update(ref(db, `impossibleComboReports/${report.key}`), {
+    status: "rejected",
+    reviewedAt: Date.now(),
+    reviewedBy: playerName || "Admin",
+  });
+}
 
 
   // ONLINE
@@ -1523,11 +1632,50 @@ const matchStartedAt = isOnlineRoom
     settingsOpen ||
     roomBrowserOpen ||
     profileOpen ||
+    reportReviewOpen ||
+    !!reportDialog ||
     !!offlineResult ||
     offmSetupOpen ||
     wordCheckOpen;
 
   useBodyScrollLock(dialogOpen);
+
+  const offlineSoloQuestion = offlineSolo
+    ? (() => {
+      const qs = getSeedQuestions();
+      const qIdx = offOrder[offIndex] ?? 0;
+      return qs[qIdx] ?? "";
+    })()
+    : "";
+
+  const offlineMultiQuestion = offlineMulti && !offmInCooldown
+    ? (() => {
+      const qs = getSeedQuestions();
+      const qIdx = offmOrder[offmIndex] ?? 0;
+      return qs[qIdx] ?? "";
+    })()
+    : "";
+
+  const currentReportQuestion = offlineSolo
+    ? offlineSoloQuestion
+    : (offlineMulti ? offlineMultiQuestion : (isOnlineRoom && room?.started ? onlineQuestion : ""));
+
+  const currentReportLetter = normalizeComboLetter(
+    offlineSolo
+      ? offLastLetter
+      : (offlineMulti ? offmLastLetter : (isOnlineRoom && room?.started ? room?.lastLetter : ""))
+  );
+
+  const currentComboApproved = isImpossibleComboApproved(
+    approvedImpossibleCombos,
+    currentReportQuestion,
+    currentReportLetter
+  );
+
+  const pendingReports = Object.entries(impossibleReports || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .filter((report) => report.status === "pending")
+    .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
 function onLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
@@ -1741,6 +1889,19 @@ function onLetterChanged(e) {
   <Button variant="stop" onClick={offlineJilla}>Jilla (vraag overslaan)</Button>
 </div>
 
+              {currentComboApproved && (
+                <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                  Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                </div>
+              )}
+
+              <Button
+                variant="alt"
+                onClick={() => openImpossibleReport(offlineSoloQuestion, offLastLetter, "offline-solo")}
+              >
+                Rapporteer combinatie
+              </Button>
+
             </div>
           </Section>
         )}
@@ -1810,6 +1971,21 @@ function onLetterChanged(e) {
           <div style={{ marginTop: 6 }}>
             <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
           </div>
+        )}
+
+        {!offmInCooldown && currentComboApproved && (
+          <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+            Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+          </div>
+        )}
+
+        {!offmInCooldown && (
+          <Button
+            variant="alt"
+            onClick={() => openImpossibleReport(offlineMultiQuestion, offmLastLetter, "offline-multi")}
+          >
+            Rapporteer combinatie
+          </Button>
         )}
       </div>
     </Section>
@@ -1955,6 +2131,21 @@ function onLetterChanged(e) {
                 </div>
               )}
 
+              {isMyTurn && !inCooldown && !room?.paused && currentComboApproved && (
+                <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                  Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                </div>
+              )}
+
+              {isMyTurn && !inCooldown && !room?.paused && (
+                <Button
+                  variant="alt"
+                  onClick={() => openImpossibleReport(onlineQuestion, room?.lastLetter, "online")}
+                >
+                  Rapporteer combinatie
+                </Button>
+              )}
+
               {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
             </div>
           </Section>
@@ -2044,7 +2235,12 @@ function onLetterChanged(e) {
       <SettingsOverlay
         open={settingsOpen}
         theme={theme}
+        reportCount={pendingReports.length}
         onThemeChange={setTheme}
+        onOpenReports={() => {
+          setSettingsOpen(false);
+          setReportReviewOpen(true);
+        }}
         onClose={() => setSettingsOpen(false)}
       />
       <RoomBrowser
@@ -2072,6 +2268,20 @@ function onLetterChanged(e) {
         onNamesChange={setOffmNames}
         onStart={startOfflineMultiFromSetup}
         onClose={() => setOffmSetupOpen(false)}
+      />
+      <ImpossibleComboReportOverlay
+        open={!!reportDialog}
+        report={reportDialog}
+        alreadyApproved={isImpossibleComboApproved(approvedImpossibleCombos, reportDialog?.question, reportDialog?.letter)}
+        onConfirm={submitImpossibleReport}
+        onClose={() => setReportDialog(null)}
+      />
+      <ImpossibleReportsReviewOverlay
+        open={reportReviewOpen}
+        reports={pendingReports}
+        onApprove={approveImpossibleReport}
+        onReject={rejectImpossibleReport}
+        onClose={() => setReportReviewOpen(false)}
       />
       <WordCheckOverlay
         open={wordCheckOpen}
