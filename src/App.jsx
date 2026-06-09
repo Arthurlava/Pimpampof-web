@@ -614,6 +614,58 @@ async function submitImpossibleReport() {
   }
 }
 
+
+function skipImpossibleComboQuestion() {
+  if (!currentComboApproved) return;
+
+  const nowTs = Date.now();
+
+  if (offlineSolo) {
+    if (!offOrder.length) return;
+    setOffIndex((index) => (index + 1) % offOrder.length);
+    setOffTurnStartAt(nowTs);
+    triggerScoreToast("Nieuwe vraag geladen", "plus");
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (offlineMulti) {
+    if (offmPhase !== "answer" || !offmOrder.length) return;
+    setOffmIndex((index) => (index + 1) % offmOrder.length);
+    setOffmTurnStartAt(nowTs);
+    triggerScoreToast("Nieuwe vraag geladen", "plus");
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (isOnlineRoom && room?.started && isMyTurn && !inCooldown && !room?.paused) {
+    const roomRef = ref(db, `rooms/${roomCode}`);
+
+    runTransaction(roomRef, (data) => {
+      if (!data || !data.started || data.paused) return data;
+      if (data.turn !== playerId) return data;
+      if (data.phase !== "answer") return data;
+
+      const listLen = data.order?.length ?? 0;
+      if (!listLen) return data;
+
+      data.currentIndex = (data.currentIndex + 1) % listLen;
+      data.turnStartAt = Date.now();
+      data.lastActivityAt = Date.now();
+      data.lastEvent = { type: "impossible_combo_new_question", by: playerId, at: Date.now() };
+      return data;
+    })
+      .then(() => {
+        triggerScoreToast("Nieuwe vraag geladen", "plus");
+        setTimeout(() => letterRef.current?.focus(), 0);
+      })
+      .catch((error) => {
+        console.error("Kon geen nieuwe vraag laden", error);
+        alert("Kon geen nieuwe vraag laden. Controleer je verbinding of Firebase regels.");
+      });
+  }
+}
+
 async function saveImpossibleBackup(action, comboKey, extra = {}) {
   const backupId = createId();
 
@@ -2009,9 +2061,12 @@ function onLetterChanged(e) {
 </div>
 
               {currentComboApproved && (
-                <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
-                  Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
-                </div>
+                <>
+                  <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                    Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                  </div>
+                  <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+                </>
               )}
 
               <Button
@@ -2093,9 +2148,12 @@ function onLetterChanged(e) {
         )}
 
         {!offmInCooldown && currentComboApproved && (
-          <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
-            Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
-          </div>
+          <>
+            <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+              Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+            </div>
+            <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+          </>
         )}
 
         {!offmInCooldown && (
@@ -2251,9 +2309,12 @@ function onLetterChanged(e) {
               )}
 
               {isMyTurn && !inCooldown && !room?.paused && currentComboApproved && (
-                <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
-                  Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
-                </div>
+                <>
+                  <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
+                    Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
+                  </div>
+                  <Button onClick={skipImpossibleComboQuestion}>Nieuwe vraag</Button>
+                </>
               )}
 
               {isMyTurn && !inCooldown && !room?.paused && (
