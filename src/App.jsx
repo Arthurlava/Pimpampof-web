@@ -92,6 +92,8 @@ export default function PimPamPofWeb() {
   const [theme, setTheme] = useState(() => localStorage.getItem("ppp.theme") || "green");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [offlineResult, setOfflineResult] = useState(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profile, setProfile] = useState(null);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -1553,9 +1555,6 @@ function onLetterChanged(e) {
 
 
 
-  /* Profiel (match history + highscore) */
-  const [profileOpen, setProfileOpen] = useState(false);
-  const [profile, setProfile] = useState(null);
   useEffect(() => {
     if (!playerId) return;
     const profRef = ref(db, `profiles/${playerId}`);
