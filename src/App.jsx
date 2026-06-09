@@ -32,12 +32,15 @@ import { Section } from "./components/common/Section";
 import { useOnline } from "./hooks/useOnline";
 import { useQuestions } from "./hooks/useQuestions";
 import { WhatsNewPanel } from "./components/home/WhatsNewPanel";
+import { ThemePanel } from "./components/home/ThemePanel";
+import { MainMenuPanel } from "./components/home/MainMenuPanel";
 import { QuestionManager } from "./components/questions/QuestionManager";
 import { RoomBrowser } from "./components/online/RoomBrowser";
 import { BottomScoreBar } from "./components/online/BottomScoreBar";
 import { ProfileOverlay } from "./components/profile/ProfileOverlay";
 import { WordCheckOverlay } from "./components/word-check/WordCheckOverlay";
 import { OfflineMultiSetup } from "./components/offline/OfflineMultiSetup";
+import { OfflineResultOverlay } from "./components/offline/OfflineResultOverlay";
 import { LeaderboardOverlay } from "./components/feedback/LeaderboardOverlay";
 import { PofToast } from "./components/feedback/PofToast";
 import { ScoreToast } from "./components/feedback/ScoreToast";
@@ -62,16 +65,36 @@ import {
 export default function PimPamPofWeb() {
   const {
     vragen,
+    activeQuestions,
+    visibleQuestions,
+    categories,
+    selectedCategory,
+    setSelectedCategory,
+    newQuestionCategory,
+    setNewQuestionCategory,
+    newCategoryName,
+    setNewCategoryName,
+    voegCategorieToe,
     invoer,
     setInvoer,
     voegVragenToe,
     verwijderVraag,
+    toggleVraagActief,
+    veranderVraagCategorie,
     kopieerAlle,
     resetStandaardVragen,
   } = useQuestions();
 
   const [playerName, setPlayerName] = useState(() => localStorage.getItem(NAME_KEY) || "");
   useEffect(() => { localStorage.setItem(NAME_KEY, playerName || ""); }, [playerName]);
+
+  const [theme, setTheme] = useState(() => localStorage.getItem("ppp.theme") || "green");
+  const [offlineResult, setOfflineResult] = useState(null);
+
+  useEffect(() => {
+    document.body.dataset.theme = theme;
+    localStorage.setItem("ppp.theme", theme);
+  }, [theme]);
 
   // playerId = auth.uid (wacht tot anonieme login klaar is)
   const [playerId, setPlayerId] = useState(null);
@@ -109,7 +132,7 @@ const [offJillaCount, setOffJillaCount] = useState(0);
 const [offDoubleCount, setOffDoubleCount] = useState(0);
 
 function startOffline() {
-  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+  const qs = getSeedQuestions();
   if (!qs.length) { alert("Geen vragen beschikbaar."); return; }
 
   setOfflineSolo(true);
@@ -130,6 +153,17 @@ function startOffline() {
 }
 
 function stopOffline() {
+  if (offlineSolo) {
+    setOfflineResult({
+      type: "solo",
+      score: offScore,
+      answered: offAnswered,
+      totalTimeMs: offTotalTimeMs,
+      jilla: offJillaCount,
+      doublePof: offDoubleCount,
+    });
+  }
+
   setOfflineSolo(false);
   setOffIndex(-1);
   setOffLastLetter("?");
@@ -197,7 +231,7 @@ const [offmCooldownEndAt, setOffmCooldownEndAt] = useState(null);
 const [offmStartedAt, setOffmStartedAt] = useState(null);
 
 const [offmScores, setOffmScores] = useState({});
-const [, setOffmStats] = useState({});
+const [offmStats, setOffmStats] = useState({});
 const [offmJail, setOffmJail] = useState({});
 const [offmJillaLast, setOffmJillaLast] = useState(null);
 
@@ -211,6 +245,23 @@ function openOfflineMultiSetup() {
 }
 
 function stopOfflineMulti() {
+  if (offlineMulti && offmPlayers.length > 0) {
+    const players = offmPlayers.map((player) => {
+      const stats = offmStats[player.id] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+      return {
+        id: player.id,
+        name: player.name,
+        score: offmScores[player.id] || 0,
+        totalTimeMs: stats.totalTimeMs || 0,
+        answered: stats.answeredCount || 0,
+        jilla: stats.jillaCount || 0,
+        doublePof: stats.doubleCount || 0,
+      };
+    }).sort((a, b) => b.score - a.score || a.name.localeCompare(b.name));
+
+    setOfflineResult({ type: "multi", players });
+  }
+
   setOfflineMulti(false);
   setOffmSetupOpen(false);
   setOffmPlayers([]);
@@ -585,7 +636,8 @@ function attachRoomListener(code) {
 
 
   function getSeedQuestions() {
-    return (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+    const active = activeQuestions.map((question) => question.tekst).filter(Boolean);
+    return active.length > 0 ? active : DEFAULT_VRAGEN;
   }
 
   async function createRoom({ autoStart = false, solo = false } = {}) {
@@ -1515,35 +1567,6 @@ function onLetterChanged(e) {
               />
             )}
 
-            {!isOnlineRoom && !offlineSolo && !offlineMulti && (
-              <>
-                {!online ? (
-                  <>
-                    <span className="badge">alleen solo</span>
-                    <Button onClick={startOffline}>Solo Mode</Button>
-                  </>
-                ) : (
-                  <>
-                    <Button variant="alt" onClick={() => createRoom({ autoStart: false, solo: false })}>
-                      Room aanmaken
-                    </Button>
-                    <Button variant="alt" onClick={openRoomBrowser}>Rooms bekijken</Button>
-                    <input
-                      style={styles.input}
-                      placeholder="Room code"
-                      value={roomCodeInput}
-                      onChange={e => setRoomCodeInput(e.target.value.toUpperCase())}
-                    />
-                    <Button variant="alt" onClick={joinRoom}>Join</Button>
-                    <Button onClick={startOffline}>Solo (offline)</Button>
-                    <Button onClick={openOfflineMultiSetup}>Offline multiplayer</Button>
-                    <Button onClick={() => (window.location.href = URL_DIEREN)} title="Ga naar Dierenspel">
-                      ↔️ Naar Dierenspel
-                    </Button>
-                  </>
-                )}
-              </>
-            )}
 
             {offlineSolo && (
               <Button variant="stop" onClick={stopOffline}>Stop solo</Button>
@@ -1620,15 +1643,45 @@ function onLetterChanged(e) {
           />
         )}
 
+        {!isOnlineRoom && !offlineSolo && !offlineMulti && (
+          <MainMenuPanel
+            online={online}
+            roomCodeInput={roomCodeInput}
+            onRoomCodeInputChange={setRoomCodeInput}
+            onCreateRoom={() => createRoom({ autoStart: false, solo: false })}
+            onBrowseRooms={openRoomBrowser}
+            onJoinRoom={joinRoom}
+            onStartSolo={startOffline}
+            onStartOfflineMulti={openOfflineMultiSetup}
+            onOpenDieren={() => (window.location.href = URL_DIEREN)}
+          />
+        )}
+
+        {!offlineSolo && !offlineMulti && !room?.started && (
+          <ThemePanel theme={theme} onThemeChange={setTheme} />
+        )}
+
         {(!isOnlineRoom || (isOnlineRoom && isHost && !room?.started)) && !offlineSolo && !offlineMulti && (
           <QuestionManager
             input={invoer}
             onInputChange={setInvoer}
-            questions={vragen}
+            questions={visibleQuestions}
+            totalQuestions={vragen.length}
+            activeQuestions={activeQuestions}
+            categories={categories}
+            selectedCategory={selectedCategory}
+            onSelectedCategoryChange={setSelectedCategory}
+            newQuestionCategory={newQuestionCategory}
+            onNewQuestionCategoryChange={setNewQuestionCategory}
+            newCategoryName={newCategoryName}
+            onNewCategoryNameChange={setNewCategoryName}
+            onAddCategory={voegCategorieToe}
             onAddQuestions={voegVragenToe}
             onCopyAll={kopieerAlle}
             onResetDefault={resetStandaardVragen}
             onRemoveQuestion={verwijderVraag}
+            onToggleQuestionActive={toggleVraagActief}
+            onChangeQuestionCategory={veranderVraagCategorie}
           />
         )}
 
@@ -1660,7 +1713,7 @@ function onLetterChanged(e) {
               </div>
               <div style={{ fontSize: 22, minHeight: "3rem" }}>
                 {(() => {
-                  const qs = (vragen.length > 0 ? vragen.map(v => v.tekst) : DEFAULT_VRAGEN);
+                  const qs = getSeedQuestions();
                   const qIdx = offOrder[offIndex] ?? 0;
                   return qs[qIdx] ?? "Vraag komt hier...";
                 })()}
@@ -1991,6 +2044,10 @@ function onLetterChanged(e) {
         open={profileOpen}
         profile={profile}
         onClose={() => setProfileOpen(false)}
+      />
+      <OfflineResultOverlay
+        result={offlineResult}
+        onClose={() => setOfflineResult(null)}
       />
       <OfflineMultiSetup
         open={offmSetupOpen}

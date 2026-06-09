@@ -1,5 +1,46 @@
+
+:root,
+body[data-theme="green"] {
+  --page-bg-start: #171717;
+  --page-bg-end: #262626;
+  --accent: #16a34a;
+  --accent-dark: #065f46;
+  --neutral: #475569;
+  --panel-bg: rgba(255,255,255,0.05);
+  --panel-border: rgba(255,255,255,0.1);
+}
+
+body[data-theme="blue"] {
+  --page-bg-start: #0f172a;
+  --page-bg-end: #1e3a8a;
+  --accent: #2563eb;
+  --accent-dark: #1e40af;
+  --neutral: #475569;
+  --panel-bg: rgba(255,255,255,0.06);
+  --panel-border: rgba(147,197,253,0.22);
+}
+
+body[data-theme="orange"] {
+  --page-bg-start: #1c1917;
+  --page-bg-end: #7c2d12;
+  --accent: #ea580c;
+  --accent-dark: #9a3412;
+  --neutral: #57534e;
+  --panel-bg: rgba(255,255,255,0.06);
+  --panel-border: rgba(251,146,60,0.25);
+}
+
+body[data-theme="purple"] {
+  --page-bg-start: #1e1b4b;
+  --page-bg-end: #581c87;
+  --accent: #9333ea;
+  --accent-dark: #6b21a8;
+  --neutral: #4c1d95;
+  --panel-bg: rgba(255,255,255,0.06);
+  --panel-border: rgba(216,180,254,0.25);
+}
 html, body, #root { height: 100%; }
-    body { margin: 0; background: linear-gradient(180deg, #171717 0%, #262626 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    body { margin: 0; background: linear-gradient(180deg, var(--page-bg-start) 0%, var(--page-bg-end) 100%); color: #fff; font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
    #root { width: min(100%, 720px) !important; margin-left: auto !important; margin-right: auto !important; padding: 24px 16px 120px; box-sizing: border-box; display: block !important; float: none !important; }
     .badge { display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border-radius:999px; background: rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.15); font-size: 12px; }
     .muted { color: rgba(255,255,255,0.7); font-size:12px; }
@@ -88,3 +129,17 @@ html, body, #root { height: 100%; }
     .table th { font-weight: 700; }
 
     .hot-jilla { outline: 2px solid #fb923c; border-radius: 12px; }
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  text-align: left;
+}
+
+.mode-card {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255,255,255,0.055);
+  border: 1px solid rgba(255,255,255,0.12);
+}

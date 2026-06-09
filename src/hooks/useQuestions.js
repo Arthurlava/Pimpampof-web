@@ -1,12 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DEFAULT_VRAGEN } from "../data/defaultQuestions";
 import { OLD_KEYS, STORAGE_KEY } from "../config/constants";
 import { createId, splitInput } from "../utils/gameUtils";
+
+const DEFAULT_CATEGORY = "Algemeen";
+const ALL_CATEGORIES = "Alles";
+
+function cleanCategory(value) {
+  const category = String(value || "").trim();
+  return category || DEFAULT_CATEGORY;
+}
+
+function normalizeQuestion(question) {
+  return {
+    id: question?.id || createId(),
+    tekst: String(question?.tekst ?? question ?? ""),
+    active: question?.active !== false,
+    category: cleanCategory(question?.category),
+  };
+}
 
 function createDefaultQuestions() {
   return DEFAULT_VRAGEN.map((tekst) => ({
     id: createId(),
     tekst: String(tekst),
+    active: true,
+    category: DEFAULT_CATEGORY,
   }));
 }
 
@@ -36,10 +55,7 @@ function loadStoredQuestions() {
       return seeded;
     }
 
-    return parsed.map((question) => ({
-      id: question?.id || createId(),
-      tekst: String(question?.tekst ?? ""),
-    }));
+    return parsed.map(normalizeQuestion).filter((question) => question.tekst.trim());
   } catch {
     return createDefaultQuestions();
   }
@@ -48,6 +64,9 @@ function loadStoredQuestions() {
 export function useQuestions() {
   const [vragen, setVragen] = useState(loadStoredQuestions);
   const [invoer, setInvoer] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState(ALL_CATEGORIES);
+  const [newQuestionCategory, setNewQuestionCategory] = useState(DEFAULT_CATEGORY);
+  const [newCategoryName, setNewCategoryName] = useState("");
 
   useEffect(() => {
     try {
@@ -57,19 +76,60 @@ export function useQuestions() {
     }
   }, [vragen]);
 
+  const categories = useMemo(() => {
+    const names = new Set([DEFAULT_CATEGORY]);
+    vragen.forEach((question) => names.add(cleanCategory(question.category)));
+    return [ALL_CATEGORIES, ...Array.from(names).sort((a, b) => a.localeCompare(b))];
+  }, [vragen]);
+
+  const visibleQuestions = useMemo(() => {
+    if (selectedCategory === ALL_CATEGORIES) return vragen;
+    return vragen.filter((question) => cleanCategory(question.category) === selectedCategory);
+  }, [vragen, selectedCategory]);
+
+  const activeQuestions = useMemo(
+    () => vragen.filter((question) => question.active !== false),
+    [vragen]
+  );
+
   function voegVragenToe() {
     const items = splitInput(invoer);
     if (!items.length) return;
 
+    const category = cleanCategory(newQuestionCategory);
+
     setVragen((prev) => [
       ...prev,
-      ...items.map((tekst) => ({ id: createId(), tekst })),
+      ...items.map((tekst) => ({ id: createId(), tekst, active: true, category })),
     ]);
     setInvoer("");
   }
 
   function verwijderVraag(id) {
     setVragen((prev) => prev.filter((question) => question.id !== id));
+  }
+
+  function toggleVraagActief(id) {
+    setVragen((prev) =>
+      prev.map((question) =>
+        question.id === id ? { ...question, active: question.active === false } : question
+      )
+    );
+  }
+
+  function veranderVraagCategorie(id, category) {
+    setVragen((prev) =>
+      prev.map((question) =>
+        question.id === id ? { ...question, category: cleanCategory(category) } : question
+      )
+    );
+  }
+
+  function voegCategorieToe() {
+    const category = cleanCategory(newCategoryName);
+    setNewQuestionCategory(category);
+    setSelectedCategory(category);
+    setNewCategoryName("");
   }
 
   async function kopieerAlle() {
@@ -99,15 +159,29 @@ export function useQuestions() {
     }
 
     setVragen(seeded);
+    setSelectedCategory(ALL_CATEGORIES);
+    setNewQuestionCategory(DEFAULT_CATEGORY);
     alert("Standaard vragen opnieuw geladen.");
   }
 
   return {
     vragen,
+    activeQuestions,
+    visibleQuestions,
+    categories,
+    selectedCategory,
+    setSelectedCategory,
+    newQuestionCategory,
+    setNewQuestionCategory,
+    newCategoryName,
+    setNewCategoryName,
+    voegCategorieToe,
     invoer,
     setInvoer,
     voegVragenToe,
     verwijderVraag,
+    toggleVraagActief,
+    veranderVraagCategorie,
     kopieerAlle,
     resetStandaardVragen,
   };
