@@ -2414,22 +2414,21 @@ function onLetterChanged(e) {
         data={leaderData}
         onClose={() => setLeaderOpen(false)}
       />
-
-      <SettingsOverlay
-        open={settingsOpen}
-        theme={theme}
-        reportCount={activeImpossibleCombos.length}
-        onThemeChange={setTheme}
-        onOpenReports={() => {
-          setSettingsOpen(false);
-          setReportsOpen(true);
-        }}
-        onOpenTutorial={() => {
-          setSettingsOpen(false);
-          setTutorialOpen(true);
-        }}
-        onClose={() => setSettingsOpen(false)}
-      />
+<SettingsOverlay
+  open={settingsOpen}
+  theme={theme}
+  reportCount={pendingReports.length}
+  onThemeChange={setTheme}
+  onOpenReports={() => {
+    setSettingsOpen(false);
+    setReportReviewOpen(true);
+  }}
+  onOpenTutorial={() => {
+    setSettingsOpen(false);
+    setTutorialOpen(true);
+  }}
+  onClose={() => setSettingsOpen(false)}
+/>
       <TutorialOverlay
         open={tutorialOpen}
         onClose={() => setTutorialOpen(false)}
