@@ -103,9 +103,11 @@ export default function PimPamPofWeb() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [profile, setProfile] = useState(null);
   const [reportDialog, setReportDialog] = useState(null);
+  const [reportBusy, setReportBusy] = useState(false);
   const [reportReviewOpen, setReportReviewOpen] = useState(false);
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
+  const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -140,6 +142,15 @@ export default function PimPamPofWeb() {
     const approvedRef = ref(db, "impossibleCombos");
     const unsubscribe = onValue(approvedRef, (snap) => {
       setApprovedImpossibleCombos(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const backupsRef = ref(db, "impossibleComboBackups");
+    const unsubscribe = onValue(backupsRef, (snap) => {
+      setImpossibleComboBackups(snap.val() || {});
     });
 
     return () => unsubscribe();
@@ -553,72 +564,172 @@ function openImpossibleReport(question, letter, mode) {
 }
 
 async function submitImpossibleReport() {
-  if (!reportDialog) return;
+  if (!reportDialog || reportBusy) return;
 
   const key = makeImpossibleComboKey(reportDialog.question, reportDialog.letter);
   const reportRef = ref(db, `impossibleComboReports/${key}`);
 
-  await runTransaction(reportRef, (current) => {
-    const nowTs = Date.now();
+  setReportBusy(true);
 
-    if (!current) {
+  try {
+    await runTransaction(reportRef, (current) => {
+      const nowTs = Date.now();
+
+      if (!current) {
+        return {
+          question: reportDialog.question,
+          letter: reportDialog.letter,
+          mode: reportDialog.mode || "unknown",
+          status: "pending",
+          count: 1,
+          createdAt: nowTs,
+          updatedAt: nowTs,
+          reportedBy: playerId || null,
+          reportedByName: playerName || "Speler",
+        };
+      }
+
+      if (current.status === "approved") return current;
+
       return {
-        question: reportDialog.question,
-        letter: reportDialog.letter,
-        mode: reportDialog.mode || "unknown",
+        ...current,
+        question: current.question || reportDialog.question,
+        letter: current.letter || reportDialog.letter,
+        mode: reportDialog.mode || current.mode || "unknown",
         status: "pending",
-        count: 1,
-        createdAt: nowTs,
+        count: (current.count || 0) + 1,
         updatedAt: nowTs,
-        reportedBy: playerId || null,
-        reportedByName: playerName || "Speler",
+        reportedBy: playerId || current.reportedBy || null,
+        reportedByName: playerName || current.reportedByName || "Speler",
       };
-    }
+    });
 
-    if (current.status === "approved") return current;
+    setReportDialog(null);
+    triggerScoreToast("Rapportage opgeslagen", "plus");
+  } catch (error) {
+    console.error("Kon rapportage niet opslaan", error);
+    alert("Kon rapportage niet opslaan. Controleer je verbinding of Firebase regels.");
+  } finally {
+    setReportBusy(false);
+  }
+}
 
-    return {
-      ...current,
-      question: current.question || reportDialog.question,
-      letter: current.letter || reportDialog.letter,
-      mode: reportDialog.mode || current.mode || "unknown",
-      status: "pending",
-      count: (current.count || 0) + 1,
-      updatedAt: nowTs,
-      reportedBy: playerId || current.reportedBy || null,
-      reportedByName: playerName || current.reportedByName || "Speler",
-    };
+async function saveImpossibleBackup(action, comboKey, extra = {}) {
+  const backupId = createId();
+
+  await set(ref(db, `impossibleComboBackups/${backupId}`), {
+    action,
+    comboKey,
+    createdAt: Date.now(),
+    createdBy: playerName || "Admin",
+    rolledBackAt: null,
+    ...extra,
   });
 
-  setReportDialog(null);
-  triggerScoreToast("Rapportage opgeslagen", "plus");
+  return backupId;
 }
 
 async function approveImpossibleReport(report) {
   if (!report?.key) return;
 
-  await set(ref(db, `impossibleCombos/${report.key}`), {
-    question: report.question,
-    letter: report.letter,
-    approvedAt: Date.now(),
-    approvedBy: playerName || "Admin",
-  });
+  const nowTs = Date.now();
+  const comboBefore = approvedImpossibleCombos?.[report.key] || null;
 
-  await update(ref(db, `impossibleComboReports/${report.key}`), {
-    status: "approved",
-    reviewedAt: Date.now(),
-    reviewedBy: playerName || "Admin",
-  });
+  try {
+    await saveImpossibleBackup("approve", report.key, {
+      reportBefore: report,
+      comboBefore,
+    });
+
+    await set(ref(db, `impossibleCombos/${report.key}`), {
+      question: report.question,
+      letter: report.letter,
+      approvedAt: nowTs,
+      approvedBy: playerName || "Admin",
+    });
+
+    await update(ref(db, `impossibleComboReports/${report.key}`), {
+      status: "approved",
+      reviewedAt: nowTs,
+      reviewedBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon rapportage niet goedkeuren", error);
+    alert("Kon rapportage niet goedkeuren. Controleer je verbinding of Firebase regels.");
+  }
 }
 
 async function rejectImpossibleReport(report) {
   if (!report?.key) return;
 
-  await update(ref(db, `impossibleComboReports/${report.key}`), {
-    status: "rejected",
-    reviewedAt: Date.now(),
-    reviewedBy: playerName || "Admin",
-  });
+  try {
+    await saveImpossibleBackup("reject", report.key, {
+      reportBefore: report,
+    });
+
+    await update(ref(db, `impossibleComboReports/${report.key}`), {
+      status: "rejected",
+      reviewedAt: Date.now(),
+      reviewedBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon rapportage niet afwijzen", error);
+    alert("Kon rapportage niet afwijzen. Controleer je verbinding of Firebase regels.");
+  }
+}
+
+async function removeApprovedImpossibleCombo(combo) {
+  if (!combo?.key) return;
+  if (!confirm("Actieve onmogelijke combinatie verwijderen?")) return;
+
+  try {
+    await saveImpossibleBackup("remove-active", combo.key, {
+      comboBefore: combo,
+    });
+
+    await remove(ref(db, `impossibleCombos/${combo.key}`));
+  } catch (error) {
+    console.error("Kon actieve combinatie niet verwijderen", error);
+    alert("Kon actieve combinatie niet verwijderen. Controleer je verbinding of Firebase regels.");
+  }
+}
+
+async function rollbackImpossibleBackup(backup) {
+  if (!backup?.key || !backup?.comboKey || backup.rolledBackAt) return;
+  if (!confirm("Deze beheeractie terugdraaien?")) return;
+
+  try {
+    if (backup.action === "approve") {
+      if (backup.comboBefore) {
+        await set(ref(db, `impossibleCombos/${backup.comboKey}`), backup.comboBefore);
+      } else {
+        await remove(ref(db, `impossibleCombos/${backup.comboKey}`));
+      }
+
+      if (backup.reportBefore) {
+        const { key: _key, ...reportWithoutKey } = backup.reportBefore;
+        await set(ref(db, `impossibleComboReports/${backup.comboKey}`), reportWithoutKey);
+      }
+    }
+
+    if (backup.action === "reject" && backup.reportBefore) {
+      const { key: _key, ...reportWithoutKey } = backup.reportBefore;
+      await set(ref(db, `impossibleComboReports/${backup.comboKey}`), reportWithoutKey);
+    }
+
+    if (backup.action === "remove-active" && backup.comboBefore) {
+      const { key: _key, ...comboWithoutKey } = backup.comboBefore;
+      await set(ref(db, `impossibleCombos/${backup.comboKey}`), comboWithoutKey);
+    }
+
+    await update(ref(db, `impossibleComboBackups/${backup.key}`), {
+      rolledBackAt: Date.now(),
+      rolledBackBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon backup niet terugdraaien", error);
+    alert("Kon backup niet terugdraaien. Controleer je verbinding of Firebase regels.");
+  }
 }
 
 
@@ -1677,6 +1788,14 @@ const matchStartedAt = isOnlineRoom
     .filter((report) => report.status === "pending")
     .sort((a, b) => (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0));
 
+  const activeImpossibleCombos = Object.entries(approvedImpossibleCombos || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => (b.approvedAt || 0) - (a.approvedAt || 0));
+
+  const impossibleBackups = Object.entries(impossibleComboBackups || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
 function onLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
   if (val.length === 1) {
@@ -2273,14 +2392,19 @@ function onLetterChanged(e) {
         open={!!reportDialog}
         report={reportDialog}
         alreadyApproved={isImpossibleComboApproved(approvedImpossibleCombos, reportDialog?.question, reportDialog?.letter)}
+        busy={reportBusy}
         onConfirm={submitImpossibleReport}
         onClose={() => setReportDialog(null)}
       />
       <ImpossibleReportsReviewOverlay
         open={reportReviewOpen}
         reports={pendingReports}
+        activeCombos={activeImpossibleCombos}
+        backups={impossibleBackups}
         onApprove={approveImpossibleReport}
         onReject={rejectImpossibleReport}
+        onRemoveActive={removeApprovedImpossibleCombo}
+        onRollback={rollbackImpossibleBackup}
         onClose={() => setReportReviewOpen(false)}
       />
       <WordCheckOverlay

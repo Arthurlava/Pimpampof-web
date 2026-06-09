@@ -1,7 +1,12 @@
 import { Button } from "../common/Button";
 
-export function ImpossibleComboReportOverlay({ open, report, alreadyApproved, onConfirm, onClose }) {
+export function ImpossibleComboReportOverlay({ open, report, alreadyApproved, busy = false, onConfirm, onClose }) {
   if (!open || !report) return null;
+
+  function confirmReport(event) {
+    event.stopPropagation();
+    onConfirm();
+  }
 
   return (
     <div className="overlay" onClick={onClose}>
@@ -27,8 +32,10 @@ export function ImpossibleComboReportOverlay({ open, report, alreadyApproved, on
         )}
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 14 }}>
-          <Button variant="alt" onClick={onClose}>Annuleren</Button>
-          <Button onClick={onConfirm} disabled={alreadyApproved}>Ja, rapporteren</Button>
+          <Button variant="alt" onClick={onClose} disabled={busy}>Annuleren</Button>
+          <Button onClick={confirmReport} disabled={alreadyApproved || busy}>
+            {busy ? "Opslaan…" : "Ja, rapporteren"}
+          </Button>
         </div>
       </div>
     </div>
