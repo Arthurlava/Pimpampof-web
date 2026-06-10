@@ -62,8 +62,8 @@ export function TutorialOverlay({ open, onClose }) {
           <h3 style={{ margin: "0 0 8px 0" }}>Dubble pof</h3>
           <p style={{ margin: 0, textAlign: "left", lineHeight: 1.6 }}>
             Als de laatste letter van je antwoord hetzelfde is als de beginletter,
-            krijg je een bonus. Bijvoorbeeld: letter <b>B</b>, antwoord <b>bob</b>.
-            Het antwoord begint met <b>B</b> en eindigt ook op <b>B</b>.
+            krijg je een bonus. Bijvoorbeeld: letter <b>A</b>, antwoord <b>alpaca</b>.
+            Het antwoord begint met <b>A</b> en eindigt ook op <b>A</b>.
           </p>
         </div>
 
