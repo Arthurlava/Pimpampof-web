@@ -111,7 +111,7 @@ export default function PimPamPofWeb() {
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
   const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
-  const [letterConfirm, setLetterConfirm] = useState(null);
+  const [tutorialOpen, letterConfirm, setLetterConfirm] = useState(null);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
