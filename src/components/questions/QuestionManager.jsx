@@ -20,6 +20,7 @@ export function QuestionManager({
   newCategoryName,
   onNewCategoryNameChange,
   onAddCategory,
+  onDeleteCategory,
   onAddQuestions,
   onCopyAll,
   onResetDefault,
@@ -45,6 +46,12 @@ export function QuestionManager({
   function addQuestions() {
     onAddQuestions(currentInputCategory);
     setAddOpen(false);
+  }
+
+  function deleteSelectedCategory() {
+    if (selectedCategory === "Alles") return;
+    if (!confirm(`Categorie "${selectedCategory}" verwijderen? De vragen blijven bestaan en gaan terug naar Alles.`)) return;
+    onDeleteCategory(selectedCategory);
   }
 
   return (
@@ -103,6 +110,9 @@ export function QuestionManager({
               {addOpen ? "Nieuwe vragen sluiten" : "+ Vragen toevoegen"}
             </Button>
             <Button variant="alt" onClick={onCopyAll}>Kopieer alle vragen</Button>
+            {selectedCategory !== "Alles" && (
+              <Button variant="stop" onClick={deleteSelectedCategory}>Verwijder categorie</Button>
+            )}
             <Button variant="stop" onClick={onResetDefault}>Reset naar standaard</Button>
           </div>
         </div>

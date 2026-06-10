@@ -173,6 +173,26 @@ export function useQuestions() {
     setNewCategoryName("");
   }
 
+  function verwijderCategorie(categoryName) {
+    const category = cleanCategory(categoryName);
+    if (!category || category === ALL_CATEGORIES) return;
+
+    setVragen((prev) =>
+      prev.map((question) =>
+        cleanCategory(question.category) === category
+          ? { ...question, category: "" }
+          : question
+      )
+    );
+
+    setCustomCategories((prev) => prev.filter((item) => cleanCategory(item) !== category));
+    setSelectedCategory(ALL_CATEGORIES);
+
+    if (newQuestionCategory === category) {
+      setNewQuestionCategory("");
+    }
+  }
+
   async function kopieerAlle() {
     const vragenOmTeKopieren = visibleQuestions;
     const tekst = vragenOmTeKopieren.map((vraag) => vraag.tekst).join(",\n");
@@ -227,6 +247,7 @@ export function useQuestions() {
     newCategoryName,
     setNewCategoryName,
     voegCategorieToe,
+    verwijderCategorie,
     invoer,
     setInvoer,
     voegVragenToe,

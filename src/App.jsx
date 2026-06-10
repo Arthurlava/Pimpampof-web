@@ -36,7 +36,6 @@ import { SettingsOverlay } from "./components/home/SettingsOverlay";
 import { MainMenuPanel } from "./components/home/MainMenuPanel";
 import { QuestionManager } from "./components/questions/QuestionManager";
 import { RoomBrowser } from "./components/online/RoomBrowser";
-import { BottomScoreBar } from "./components/online/BottomScoreBar";
 import { ProfileOverlay } from "./components/profile/ProfileOverlay";
 import { WordCheckOverlay } from "./components/word-check/WordCheckOverlay";
 import { OfflineMultiSetup } from "./components/offline/OfflineMultiSetup";
@@ -69,6 +68,8 @@ import {
   normalizeComboQuestion,
 } from "./utils/impossibleCombos";
 
+const LETTER_CONFIRM_MS = 3000;
+
 /* ---------- App ---------- */
 export default function PimPamPofWeb() {
   const {
@@ -84,6 +85,7 @@ export default function PimPamPofWeb() {
     newCategoryName,
     setNewCategoryName,
     voegCategorieToe,
+    verwijderCategorie,
     invoer,
     setInvoer,
     voegVragenToe,
@@ -221,15 +223,15 @@ function onOfflineLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
   if (val.length !== 1) return;
 
-  setLetterConfirm({ mode: "offline-solo", letter: val });
+  setLetterConfirm({ mode: "offline-solo", letter: val, startedAt: Date.now() });
   e.target.value = "";
 }
 
-function applyOfflineLetter(val) {
+function applyOfflineLetter(val, actionAt = Date.now()) {
   const required = normalizeLetter(offLastLetter);
   const isDouble = required && required !== "?" && val === required;
 
-  const elapsed = Math.max(0, Date.now() - (offTurnStartAt ?? Date.now()));
+  const elapsed = Math.max(0, actionAt - (offTurnStartAt ?? actionAt));
   const basePoints = calcPoints(elapsed);
   const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
   const gain = basePoints + bonus;
@@ -403,16 +405,16 @@ function onOfflineMultiLetterChanged(e) {
   if (!offlineMulti || offmPhase !== "answer") { e.target.value = ""; return; }
   if (!offmPlayers.length || !offmOrder.length) { e.target.value = ""; return; }
 
-  setLetterConfirm({ mode: "offline-multi", letter: val });
+  setLetterConfirm({ mode: "offline-multi", letter: val, startedAt: Date.now() });
   e.target.value = "";
 }
 
-function applyOfflineMultiLetter(val) {
+function applyOfflineMultiLetter(val, actionAt = Date.now()) {
   if (!offlineMulti || offmPhase !== "answer") return;
   if (!offmPlayers.length || !offmOrder.length) return;
 
   const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
-  const nowTs = Date.now();
+  const nowTs = actionAt;
   const elapsed = Math.max(0, nowTs - (offmTurnStartAt ?? nowTs));
 
   const required = normalizeLetter(offmLastLetter);
@@ -1380,10 +1382,10 @@ if (p.scoreDelta) {
     });
   }
 
-async function submitLetterOnline(letter) {
+async function submitLetterOnline(letter, actionAt = Date.now()) {
   if (!room || room.paused) return;
 
-  const elapsedUi = room?.turnStartAt ? Math.max(0, Date.now() - room.turnStartAt) : 0;
+  const elapsedUi = room?.turnStartAt ? Math.max(0, actionAt - room.turnStartAt) : 0;
   const basePointsUi = calcPoints(elapsedUi);
   const requiredUi = normalizeLetter(room?.lastLetter);
   const isDoubleUi = requiredUi && requiredUi !== "?" && normalizeLetter(letter) === requiredUi;
@@ -1410,7 +1412,7 @@ async function submitLetterOnline(letter) {
     const required = normalizeLetter(data.lastLetter);
     const isDouble = required && required !== "?" && normalizeLetter(letter) === required;
 
-    const elapsed = data.turnStartAt ? Math.max(0, Date.now() - data.turnStartAt) : 0;
+    const elapsed = data.turnStartAt ? Math.max(0, actionAt - data.turnStartAt) : 0;
     const basePoints = calcPoints(elapsed);
     const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
     const scoreDelta = basePoints + bonus;
@@ -1761,18 +1763,21 @@ async function submitLetterOnline(letter) {
     : null;
 
   const inCooldown = room?.phase === "cooldown" && !room?.solo;
-  const effectiveNow = room?.paused ? (room?.pausedAt || now) : now;
+  const onlineTimerNow = letterConfirm?.mode === "online" ? (letterConfirm.startedAt || now) : now;
+  const effectiveNow = room?.paused ? (room?.pausedAt || now) : onlineTimerNow;
   const cooldownLeftMs = Math.max(0, (room?.cooldownEndAt || 0) - effectiveNow);
 const answerElapsedMs = (room?.phase === "answer" && room?.turnStartAt)
   ? Math.max(0, effectiveNow - room.turnStartAt) : 0;
 const potentialPoints = calcPoints(answerElapsedMs);
 
-const offElapsedMs = (offlineSolo && offTurnStartAt) ? Math.max(0, now - offTurnStartAt) : 0;
+const offTimerNow = letterConfirm?.mode === "offline-solo" ? (letterConfirm.startedAt || now) : now;
+const offElapsedMs = (offlineSolo && offTurnStartAt) ? Math.max(0, offTimerNow - offTurnStartAt) : 0;
 const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
 const offmInCooldown = offlineMulti && offmPhase === "cooldown";
+const offmTimerNow = letterConfirm?.mode === "offline-multi" ? (letterConfirm.startedAt || now) : now;
 const offmCooldownLeftMs = Math.max(0, (offmCooldownEndAt || 0) - now);
 const offmElapsedMs = (offlineMulti && offmPhase === "answer" && offmTurnStartAt)
-  ? Math.max(0, now - offmTurnStartAt) : 0;
+  ? Math.max(0, offmTimerNow - offmTurnStartAt) : 0;
 const offmPotentialPoints = offlineMulti ? calcPoints(offmElapsedMs) : 0;
 
 
@@ -1863,13 +1868,40 @@ function onLetterChanged(e) {
   if (val.length === 1) {
     if (room?.paused) { e.target.value = ""; return; }
     if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
-      setLetterConfirm({ mode: "online", letter: val });
+      setLetterConfirm({ mode: "online", letter: val, startedAt: Date.now() });
     }
     e.target.value = "";
   }
 }
 
-function cancelLetterConfirm() {
+async function cancelLetterConfirm() {
+  if (!letterConfirm) return;
+
+  const { mode, startedAt } = letterConfirm;
+  const pausedMs = Math.max(0, Date.now() - (startedAt || Date.now()));
+
+  if (mode === "offline-solo" && offTurnStartAt) {
+    setOffTurnStartAt((start) => (start ? start + pausedMs : start));
+  }
+
+  if (mode === "offline-multi" && offmTurnStartAt) {
+    setOffmTurnStartAt((start) => (start ? start + pausedMs : start));
+  }
+
+  if (mode === "online" && roomCode && room?.turnStartAt) {
+    try {
+      await runTransaction(ref(db, `rooms/${roomCode}`), (data) => {
+        if (!data || data.paused || data.phase !== "answer") return data;
+        if (data.turn !== playerId) return data;
+        if (data.turnStartAt) data.turnStartAt += pausedMs;
+        data.lastActivityAt = Date.now();
+        return data;
+      });
+    } catch (error) {
+      console.error("Kon letter-annulering niet synchroniseren", error);
+    }
+  }
+
   setLetterConfirm(null);
   setTimeout(() => letterRef.current?.focus(), 0);
 }
@@ -1877,42 +1909,58 @@ function cancelLetterConfirm() {
 async function confirmLetter() {
   if (!letterConfirm?.letter) return;
 
-  const { mode, letter } = letterConfirm;
+  const { mode, letter, startedAt } = letterConfirm;
+  const actionAt = startedAt || Date.now();
   setLetterConfirm(null);
 
   if (mode === "offline-solo" && offlineSolo) {
-    applyOfflineLetter(letter);
+    applyOfflineLetter(letter, actionAt);
     setTimeout(() => letterRef.current?.focus(), 0);
     return;
   }
 
   if (mode === "offline-multi" && offlineMulti && offmPhase === "answer") {
-    applyOfflineMultiLetter(letter);
+    applyOfflineMultiLetter(letter, actionAt);
     setTimeout(() => letterRef.current?.focus(), 0);
     return;
   }
 
   if (mode === "online" && isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused) {
-    await submitLetterOnline(letter);
+    await submitLetterOnline(letter, actionAt);
     setTimeout(() => letterRef.current?.focus(), 0);
   }
 }
 
+useEffect(() => {
+  if (!letterConfirm?.letter) return undefined;
+
+  const remainingMs = Math.max(0, LETTER_CONFIRM_MS - (Date.now() - (letterConfirm.startedAt || Date.now())));
+  const timeoutId = setTimeout(() => {
+    confirmLetter();
+  }, remainingMs);
+
+  return () => clearTimeout(timeoutId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [letterConfirm]);
+
 function renderLetterConfirm(mode) {
   if (!letterConfirm || letterConfirm.mode !== mode) return null;
+
+  const remainingMs = Math.max(0, LETTER_CONFIRM_MS - (now - (letterConfirm.startedAt || now)));
+  const remainingSeconds = Math.max(1, Math.ceil(remainingMs / 1000));
 
   return (
     <div className="letter-confirm-card">
       <div>
         <div className="letter-confirm-label">Laatste letter controleren</div>
         <div className="letter-confirm-value">
-          Nieuwe letter wordt <b>{letterConfirm.letter}</b>
+          Nieuwe letter wordt <b>{letterConfirm.letter}</b> over {remainingSeconds}s
         </div>
+        <div className="letter-confirm-note">Timer staat kort stil. Annuleer als de letter niet klopt.</div>
       </div>
 
       <div className="letter-confirm-actions">
         <Button variant="alt" onClick={cancelLetterConfirm}>Annuleer</Button>
-        <Button onClick={confirmLetter}>Bevestig</Button>
       </div>
     </div>
   );
@@ -1947,7 +1995,7 @@ function renderLetterConfirm(mode) {
         <header style={styles.header}>
           <h1 style={styles.h1}>PimPamPof</h1>
 
-          <Row>
+          <Row className="top-control-row">
             {!room?.started && !offlineSolo && !offlineMulti && (
               <input
                 style={styles.input}
@@ -1993,7 +2041,7 @@ function renderLetterConfirm(mode) {
             <Button variant="alt" onClick={() => setProfileOpen(true)}>📜 Profiel</Button>
           </Row>
 
-          <Row>
+          <Row className="top-game-row">
             {isOnlineRoom && online && isHost && !room?.started && (
               <Button onClick={startSpelOnline}>Start spel (online)</Button>
             )}
@@ -2063,6 +2111,7 @@ function renderLetterConfirm(mode) {
             newCategoryName={newCategoryName}
             onNewCategoryNameChange={setNewCategoryName}
             onAddCategory={voegCategorieToe}
+            onDeleteCategory={verwijderCategorie}
             onAddQuestions={voegVragenToe}
             onCopyAll={kopieerAlle}
             onResetDefault={resetStandaardVragen}
@@ -2114,7 +2163,7 @@ function renderLetterConfirm(mode) {
                   inputMode="text"
                   maxLength={1}
                   onChange={onOfflineLetterChanged}
-                  placeholder={letterConfirm?.mode === "offline-solo" ? "Bevestig eerst de letter…" : "Typ de laatste letter…"}
+                  placeholder={letterConfirm?.mode === "offline-solo" ? "Wacht of annuleer…" : "Typ de laatste letter…"}
                   disabled={letterConfirm?.mode === "offline-solo"}
                   style={styles.letterInput}
                 />
@@ -2202,7 +2251,7 @@ function renderLetterConfirm(mode) {
             inputMode="text"
             maxLength={1}
             onChange={onOfflineMultiLetterChanged}
-            placeholder={offmInCooldown ? "Wachten…" : (letterConfirm?.mode === "offline-multi" ? "Bevestig eerst de letter…" : "Typ de laatste letter…")}
+            placeholder={offmInCooldown ? "Wachten…" : (letterConfirm?.mode === "offline-multi" ? "Wacht of annuleer…" : "Typ de laatste letter…")}
             disabled={offmInCooldown || letterConfirm?.mode === "offline-multi"}
             style={{
               ...styles.letterInput,
@@ -2368,7 +2417,7 @@ function renderLetterConfirm(mode) {
                           ? "Jilla actief — jouw beurt wordt overgeslagen"
                           : (inCooldown
                             ? "Wachten… ronde start zo"
-                            : (letterConfirm?.mode === "online" ? "Bevestig eerst de letter…" : "Jouw beurt — typ de laatste letter…")))
+                            : (letterConfirm?.mode === "online" ? "Wacht of annuleer…" : "Jouw beurt — typ de laatste letter…")))
                   }
                   disabled={!isMyTurn || myJailCount > 0 || inCooldown || room?.paused || letterConfirm?.mode === "online"}
                   style={{
@@ -2482,7 +2531,6 @@ function renderLetterConfirm(mode) {
 </footer>
 
       </div>
-      <BottomScoreBar room={isOnlineRoom ? room : null} />
       <PofToast show={pofShow} text={pofText} />
       <ScoreToast toast={scoreToast} />
       <LeaderboardOverlay
