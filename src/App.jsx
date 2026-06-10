@@ -1956,7 +1956,6 @@ function renderLetterConfirm(mode) {
         <div className="letter-confirm-value">
           Nieuwe letter wordt <b>{letterConfirm.letter}</b> over {remainingSeconds}s
         </div>
-        <div className="letter-confirm-note">Timer staat kort stil. Annuleer als de letter niet klopt.</div>
       </div>
 
       <div className="letter-confirm-actions">
