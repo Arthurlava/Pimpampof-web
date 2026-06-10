@@ -67,6 +67,7 @@ import {
   normalizeComboLetter,
   normalizeComboQuestion,
 } from "./utils/impossibleCombos";
+import { TutorialOverlay } from "./components/settings/TutorialOverlay";
 
 const LETTER_CONFIRM_MS = 3000;
 
@@ -110,6 +111,7 @@ export default function PimPamPofWeb() {
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
   const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
+  const [tutorialOpen, setTutorialOpen] = useState(false);
   const [letterConfirm, setLetterConfirm] = useState(null);
 
   useEffect(() => {
@@ -1809,6 +1811,7 @@ const matchStartedAt = isOnlineRoom
     leaderOpen ||
     settingsOpen ||
     roomBrowserOpen ||
+    tutorialOpen ||
     profileOpen ||
     reportReviewOpen ||
     !!reportDialog ||
@@ -2537,17 +2540,24 @@ function renderLetterConfirm(mode) {
         data={leaderData}
         onClose={() => setLeaderOpen(false)}
       />
-
-      <SettingsOverlay
-        open={settingsOpen}
-        theme={theme}
-        reportCount={pendingReports.length}
-        onThemeChange={setTheme}
-        onOpenReports={() => {
-          setSettingsOpen(false);
-          setReportReviewOpen(true);
-        }}
-        onClose={() => setSettingsOpen(false)}
+<SettingsOverlay
+  open={settingsOpen}
+  theme={theme}
+  reportCount={pendingReports.length}
+  onThemeChange={setTheme}
+  onOpenReports={() => {
+    setSettingsOpen(false);
+    setReportReviewOpen(true);
+  }}
+  onOpenTutorial={() => {
+    setSettingsOpen(false);
+    setTutorialOpen(true);
+  }}
+  onClose={() => setSettingsOpen(false)}
+/>
+      <TutorialOverlay
+        open={tutorialOpen}
+        onClose={() => setTutorialOpen(false)}
       />
       <RoomBrowser
         open={roomBrowserOpen}

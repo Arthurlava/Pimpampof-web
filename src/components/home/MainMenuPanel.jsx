@@ -43,7 +43,7 @@ export function MainMenuPanel({
         <MenuCard
           title="Solo"
           text="Speel alleen met timer, punten, Jilla en Dubble pof."
-          badge="Snel starten"
+          badge="Singleplayer"
           featured
         >
           <Button onClick={onStartSolo}>Start solo</Button>
@@ -59,14 +59,14 @@ export function MainMenuPanel({
 
         <MenuCard
           title="Online room"
-          text={online ? "Maak een room of join met een roomcode." : "Online rooms werken niet als je offline bent."}
+          text={online ? "Maak een room of join met een roomcode of via Join rooms." : "Online rooms werken niet als je offline bent."}
           badge={online ? "Online" : "Offline"}
         >
           {online ? (
             <>
               <div className="mode-action-row">
-                <Button variant="alt" onClick={onCreateRoom}>Room aanmaken</Button>
-                <Button variant="alt" onClick={onBrowseRooms}>Rooms bekijken</Button>
+                <Button variant="alt" onClick={onCreateRoom}>Maak room</Button>
+                <Button variant="alt" onClick={onBrowseRooms}>Join rooms</Button>
               </div>
               <div className="room-code-row">
                 <input
@@ -85,7 +85,7 @@ export function MainMenuPanel({
 
         <MenuCard
           title="Dierenspel"
-          text="Open het andere spel in dezelfde stijl."
+          text="Open het andere spel in dezelfde stijl, alleen dan met een vaste vraag: Noem een dier dat begint met de letter waar het vorige dier op eindigde."
           badge="Extra"
         >
           <Button onClick={onOpenDieren}>Naar Dierenspel</Button>

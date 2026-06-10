@@ -105,15 +105,15 @@ export function QuestionManager({
               : `Alleen actieve vragen uit deze categorie worden gebruikt.`}
           </span>
 
-          <div className="question-toolbar-actions">
+          <div className="question-toolbar-actions" aria-label="Vraagbeheer acties">
             <Button variant="alt" onClick={() => setAddOpen((open) => !open)}>
-              {addOpen ? "Nieuwe vragen sluiten" : "+ Vragen toevoegen"}
+              {addOpen ? "Sluit toevoegen" : "+ Vragen"}
             </Button>
-            <Button variant="alt" onClick={onCopyAll}>Kopieer alle vragen</Button>
+            <Button variant="alt" onClick={onCopyAll}>Kopieer</Button>
+            <Button variant="stop" onClick={onResetDefault}>Reset</Button>
             {selectedCategory !== "Alles" && (
               <Button variant="stop" onClick={deleteSelectedCategory}>Verwijder categorie</Button>
             )}
-            <Button variant="stop" onClick={onResetDefault}>Reset naar standaard</Button>
           </div>
         </div>
 
