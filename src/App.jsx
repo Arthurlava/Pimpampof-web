@@ -108,6 +108,7 @@ export default function PimPamPofWeb() {
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
   const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
+  const [letterConfirm, setLetterConfirm] = useState(null);
 
   useEffect(() => {
     document.body.dataset.theme = theme;
@@ -220,6 +221,11 @@ function onOfflineLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
   if (val.length !== 1) return;
 
+  setLetterConfirm({ mode: "offline-solo", letter: val });
+  e.target.value = "";
+}
+
+function applyOfflineLetter(val) {
   const required = normalizeLetter(offLastLetter);
   const isDouble = required && required !== "?" && val === required;
 
@@ -244,8 +250,6 @@ function onOfflineLetterChanged(e) {
       "plus"
     );
   }
-
-  e.target.value = "";
 }
 
 function offlineJilla() {
@@ -399,6 +403,14 @@ function onOfflineMultiLetterChanged(e) {
   if (!offlineMulti || offmPhase !== "answer") { e.target.value = ""; return; }
   if (!offmPlayers.length || !offmOrder.length) { e.target.value = ""; return; }
 
+  setLetterConfirm({ mode: "offline-multi", letter: val });
+  e.target.value = "";
+}
+
+function applyOfflineMultiLetter(val) {
+  if (!offlineMulti || offmPhase !== "answer") return;
+  if (!offmPlayers.length || !offmOrder.length) return;
+
   const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
   const nowTs = Date.now();
   const elapsed = Math.max(0, nowTs - (offmTurnStartAt ?? nowTs));
@@ -439,8 +451,6 @@ function onOfflineMultiLetterChanged(e) {
       "plus"
     );
   }
-
-  e.target.value = "";
 }
 
 function offlineMultiJilla() {
@@ -1853,10 +1863,59 @@ function onLetterChanged(e) {
   if (val.length === 1) {
     if (room?.paused) { e.target.value = ""; return; }
     if (isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown) {
-      submitLetterOnline(val);
+      setLetterConfirm({ mode: "online", letter: val });
     }
     e.target.value = "";
   }
+}
+
+function cancelLetterConfirm() {
+  setLetterConfirm(null);
+  setTimeout(() => letterRef.current?.focus(), 0);
+}
+
+async function confirmLetter() {
+  if (!letterConfirm?.letter) return;
+
+  const { mode, letter } = letterConfirm;
+  setLetterConfirm(null);
+
+  if (mode === "offline-solo" && offlineSolo) {
+    applyOfflineLetter(letter);
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (mode === "offline-multi" && offlineMulti && offmPhase === "answer") {
+    applyOfflineMultiLetter(letter);
+    setTimeout(() => letterRef.current?.focus(), 0);
+    return;
+  }
+
+  if (mode === "online" && isOnlineRoom && isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused) {
+    await submitLetterOnline(letter);
+    setTimeout(() => letterRef.current?.focus(), 0);
+  }
+}
+
+function renderLetterConfirm(mode) {
+  if (!letterConfirm || letterConfirm.mode !== mode) return null;
+
+  return (
+    <div className="letter-confirm-card">
+      <div>
+        <div className="letter-confirm-label">Laatste letter controleren</div>
+        <div className="letter-confirm-value">
+          Nieuwe letter wordt <b>{letterConfirm.letter}</b>
+        </div>
+      </div>
+
+      <div className="letter-confirm-actions">
+        <Button variant="alt" onClick={cancelLetterConfirm}>Annuleer</Button>
+        <Button onClick={confirmLetter}>Bevestig</Button>
+      </div>
+    </div>
+  );
 }
 
 
@@ -2015,8 +2074,8 @@ function onLetterChanged(e) {
 
         {offlineSolo && (
           <Section>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-              <div className="badge">Solo</div>
+            <div className="game-card">
+              <div className="game-mode-badge">Solo</div>
 <Row>
   <span className="badge">🏅 Punten: <b>{offScore}</b></span>
   <span className="badge">✅ Antwoorden: <b>{offAnswered}</b></span>
@@ -2036,10 +2095,11 @@ function onLetterChanged(e) {
   </span>
 </Row>
 
-              <div style={{ fontSize: 18 }}>
-                Laatste letter: <span style={{ fontWeight: 700 }}>{offLastLetter}</span>
+              <div className="game-letter-panel">
+                <span className="game-letter-label">Huidige letter</span>
+                <span className="game-letter-value">{offLastLetter}</span>
               </div>
-              <div style={{ fontSize: 22, minHeight: "3rem" }}>
+              <div className="game-question-card">
                 {(() => {
                   const qs = getSeedQuestions();
                   const qIdx = offOrder[offIndex] ?? 0;
@@ -2047,18 +2107,23 @@ function onLetterChanged(e) {
                 })()}
               </div>
 
-              <input
-                ref={letterRef}
-                type="text"
-                inputMode="text"
-                maxLength={1}
-                onChange={onOfflineLetterChanged}
-                placeholder="Typ de laatste letter…"
-                style={styles.letterInput}
-              />
-              <div style={{ marginTop: 6 }}>
-  <Button variant="stop" onClick={offlineJilla}>Jilla (vraag overslaan)</Button>
-</div>
+              <div className="game-input-panel">
+                <input
+                  ref={letterRef}
+                  type="text"
+                  inputMode="text"
+                  maxLength={1}
+                  onChange={onOfflineLetterChanged}
+                  placeholder={letterConfirm?.mode === "offline-solo" ? "Bevestig eerst de letter…" : "Typ de laatste letter…"}
+                  disabled={letterConfirm?.mode === "offline-solo"}
+                  style={styles.letterInput}
+                />
+                {renderLetterConfirm("offline-solo")}
+              </div>
+
+              <div className="game-action-row">
+                <Button variant="stop" onClick={offlineJilla}>Jilla (vraag overslaan)</Button>
+              </div>
 
               {currentComboApproved && (
                 <>
@@ -2069,12 +2134,14 @@ function onLetterChanged(e) {
                 </>
               )}
 
-              <Button
-                variant="alt"
-                onClick={() => openImpossibleReport(offlineSoloQuestion, offLastLetter, "offline-solo")}
-              >
-                Rapporteer combinatie
-              </Button>
+              <div className="game-action-row">
+                <Button
+                  variant="alt"
+                  onClick={() => openImpossibleReport(offlineSoloQuestion, offLastLetter, "offline-solo")}
+                >
+                  Rapporteer combinatie
+                </Button>
+              </div>
 
             </div>
           </Section>
@@ -2082,8 +2149,8 @@ function onLetterChanged(e) {
 {offlineMulti && (
   <>
     <Section>
-      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-        <div className="badge">Offline multiplayer</div>
+      <div className="game-card">
+        <div className="game-mode-badge">Offline multiplayer</div>
 
         {(() => {
           const active = offmJillaLast && (Date.now() - (offmJillaLast.at || 0) < 2000);
@@ -2094,7 +2161,7 @@ function onLetterChanged(e) {
           ) : null;
         })()}
 
-        <div className="badge">
+        <div className="game-turn-badge">
           Beurt: <b>{offmPlayers?.[offmTurnIx]?.name ?? "Speler"}</b>
         </div>
 
@@ -2113,11 +2180,12 @@ function onLetterChanged(e) {
           </Row>
         )}
 
-        <div style={{ fontSize: 18 }}>
-          Laatste letter: <span style={{ fontWeight: 700 }}>{offmLastLetter}</span>
+        <div className="game-letter-panel">
+          <span className="game-letter-label">Huidige letter</span>
+          <span className="game-letter-value">{offmLastLetter}</span>
         </div>
 
-        <div style={{ fontSize: 22, minHeight: "3rem" }}>
+        <div className="game-question-card">
           {offmInCooldown
             ? "Wachten…"
             : (() => {
@@ -2127,22 +2195,25 @@ function onLetterChanged(e) {
               })()}
         </div>
 
-        <input
-          ref={letterRef}
-          type="text"
-          inputMode="text"
-          maxLength={1}
-          onChange={onOfflineMultiLetterChanged}
-          placeholder={offmInCooldown ? "Wachten…" : "Typ de laatste letter…"}
-          disabled={offmInCooldown}
-          style={{
-            ...styles.letterInput,
-            opacity: offmInCooldown ? 0.5 : 1
-          }}
-        />
+        <div className="game-input-panel">
+          <input
+            ref={letterRef}
+            type="text"
+            inputMode="text"
+            maxLength={1}
+            onChange={onOfflineMultiLetterChanged}
+            placeholder={offmInCooldown ? "Wachten…" : (letterConfirm?.mode === "offline-multi" ? "Bevestig eerst de letter…" : "Typ de laatste letter…")}
+            disabled={offmInCooldown || letterConfirm?.mode === "offline-multi"}
+            style={{
+              ...styles.letterInput,
+              opacity: (offmInCooldown || letterConfirm?.mode === "offline-multi") ? 0.5 : 1
+            }}
+          />
+          {renderLetterConfirm("offline-multi")}
+        </div>
 
         {!offmInCooldown && (
-          <div style={{ marginTop: 6 }}>
+          <div className="game-action-row">
             <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
           </div>
         )}
@@ -2157,12 +2228,14 @@ function onLetterChanged(e) {
         )}
 
         {!offmInCooldown && (
-          <Button
-            variant="alt"
-            onClick={() => openImpossibleReport(offlineMultiQuestion, offmLastLetter, "offline-multi")}
-          >
-            Rapporteer combinatie
-          </Button>
+          <div className="game-action-row">
+            <Button
+              variant="alt"
+              onClick={() => openImpossibleReport(offlineMultiQuestion, offmLastLetter, "offline-multi")}
+            >
+              Rapporteer combinatie
+            </Button>
+          </div>
         )}
       </div>
     </Section>
@@ -2210,8 +2283,8 @@ function onLetterChanged(e) {
 
         {isOnlineRoom && room?.started && (
           <Section>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-              <div className="badge">
+            <div className="game-card">
+              <div className="game-room-badge">
                 Room: <b>{roomCode}</b>
                 <button
                   onClick={copyRoomCode}
@@ -2245,10 +2318,11 @@ function onLetterChanged(e) {
                 </>
               )}
 
-              <div style={{ fontSize: 18 }}>
-                Laatste letter: <span style={{ fontWeight: 700 }}>{room?.lastLetter ?? "?"}</span>
+              <div className="game-letter-panel">
+                <span className="game-letter-label">Huidige letter</span>
+                <span className="game-letter-value">{room?.lastLetter ?? "?"}</span>
               </div>
-              <div style={{ fontSize: 22, minHeight: "3rem" }}>
+              <div className="game-question-card">
                 {onlineQuestion ?? "Vraag komt hier..."}
               </div>
 
@@ -2278,32 +2352,35 @@ function onLetterChanged(e) {
 
               {room.paused && <div className="badge">⏸️ Gepauzeerd — timer staat stil</div>}
 
-              <input
-                ref={letterRef}
-                type="text"
-                inputMode="text"
-                maxLength={1}
-                onChange={onLetterChanged}
-                placeholder={
-                  room?.paused
-                    ? "Gepauzeerd…"
-                    : !isMyTurn
-                      ? "Niet jouw beurt"
-                      : (myJailCount > 0
-                        ? "Jilla actief — jouw beurt wordt overgeslagen"
-                        : (inCooldown
-                          ? "Wachten… ronde start zo"
-                          : "Jouw beurt — typ de laatste letter…"))
-                }
-                disabled={!isMyTurn || myJailCount > 0 || inCooldown || room?.paused}
-                style={{
-                  ...styles.letterInput,
-                  opacity: (isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused) ? 1 : 0.5
-                }}
-              />
+              <div className="game-input-panel">
+                <input
+                  ref={letterRef}
+                  type="text"
+                  inputMode="text"
+                  maxLength={1}
+                  onChange={onLetterChanged}
+                  placeholder={
+                    room?.paused
+                      ? "Gepauzeerd…"
+                      : !isMyTurn
+                        ? "Niet jouw beurt"
+                        : (myJailCount > 0
+                          ? "Jilla actief — jouw beurt wordt overgeslagen"
+                          : (inCooldown
+                            ? "Wachten… ronde start zo"
+                            : (letterConfirm?.mode === "online" ? "Bevestig eerst de letter…" : "Jouw beurt — typ de laatste letter…")))
+                  }
+                  disabled={!isMyTurn || myJailCount > 0 || inCooldown || room?.paused || letterConfirm?.mode === "online"}
+                  style={{
+                    ...styles.letterInput,
+                    opacity: (isMyTurn && myJailCount === 0 && !inCooldown && !room?.paused && letterConfirm?.mode !== "online") ? 1 : 0.5
+                  }}
+                />
+                {renderLetterConfirm("online")}
+              </div>
 
               {isMyTurn && !inCooldown && !room?.paused && (
-                <div style={{ marginTop: 6 }}>
+                <div className="game-action-row">
                   <Button variant="stop" onClick={useJilla}>Jilla (vraag overslaan)</Button>
                 </div>
               )}
@@ -2318,12 +2395,14 @@ function onLetterChanged(e) {
               )}
 
               {isMyTurn && !inCooldown && !room?.paused && (
-                <Button
-                  variant="alt"
-                  onClick={() => openImpossibleReport(onlineQuestion, room?.lastLetter, "online")}
-                >
-                  Rapporteer combinatie
-                </Button>
+                <div className="game-action-row">
+                  <Button
+                    variant="alt"
+                    onClick={() => openImpossibleReport(onlineQuestion, room?.lastLetter, "online")}
+                  >
+                    Rapporteer combinatie
+                  </Button>
+                </div>
               )}
 
               {!isMyTurn && <div className="muted">Wachten op je beurt…</div>}
