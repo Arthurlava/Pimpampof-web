@@ -3,15 +3,20 @@ self.addEventListener("notificationclick", (event) => {
   const targetUrl = event.notification.data?.url || self.registration.scope;
 
   event.waitUntil((async () => {
+    const target = new URL(targetUrl);
     const clientsList = await clients.matchAll({ type: "window", includeUncontrolled: true });
+
+    // Focus eerst het bestaande speltabblad zonder navigatie of reload.
+    // Daardoor blijft de actuele room- en spelstate intact.
     for (const client of clientsList) {
-      if ("focus" in client) {
+      const clientUrl = new URL(client.url);
+      if (clientUrl.origin === target.origin && clientUrl.pathname === target.pathname && "focus" in client) {
         await client.focus();
-        if ("navigate" in client) await client.navigate(targetUrl);
         return;
       }
     }
 
+    // Alleen als het spel niet meer openstaat, wordt een room-link geopend.
     if (clients.openWindow) await clients.openWindow(targetUrl);
   })());
 });

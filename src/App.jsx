@@ -1149,6 +1149,7 @@ async function toggleTurnNotifications() {
   const previousStartedRef = useRef(false);
   const pendingTurnNotificationRef = useRef(false);
   const notificationRoomCodeRef = useRef(null);
+  const notificationJoinHandledRef = useRef(false);
 
   // UI toasts
   const [pofShow, setPofShow] = useState(false);
@@ -1403,6 +1404,26 @@ function attachRoomListener(code) {
     setRoomBrowserOpen(false);
     attachRoomListener(code);
   }
+
+  useEffect(() => {
+    if (notificationJoinHandledRef.current || !authReady || !playerId || roomCode) return;
+
+    const params = new URLSearchParams(window.location.search);
+    const notificationRoomCode = (params.get("room") || "").trim().toUpperCase();
+    if (!notificationRoomCode) return;
+
+    notificationJoinHandledRef.current = true;
+    void (async () => {
+      await joinRoom(notificationRoomCode);
+
+      params.delete("room");
+      const nextQuery = params.toString();
+      const cleanUrl = `${window.location.pathname}${nextQuery ? `?${nextQuery}` : ""}${window.location.hash}`;
+      window.history.replaceState({}, "", cleanUrl);
+    })();
+    // `joinRoom` gebruikt de actuele naam en auth-state op het moment dat deze effect draait.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authReady, playerId, roomCode]);
 
   async function loadAvailableRooms() {
     if (!authReady || !playerId) {
@@ -2174,7 +2195,7 @@ const matchStartedAt = isOnlineRoom
       previousStartedRef.current = Boolean(room?.started);
       pendingTurnNotificationRef.current = false;
       turnNotificationKeyRef.current = null;
-      return;
+      return undefined;
     }
 
     const previousTurn = previousTurnRef.current;
@@ -2190,8 +2211,6 @@ const matchStartedAt = isOnlineRoom
       && previousTurn !== playerId
     );
 
-    // Bij de eerste vraag verandert `turn` meestal niet: alleen `started` gaat
-    // van false naar true. Dit is daarom een aparte geldige notificatietrigger.
     const startedWithMyTurn = Boolean(
       !wasStarted
       && isStarted
@@ -2204,12 +2223,10 @@ const matchStartedAt = isOnlineRoom
 
     if (currentTurn !== playerId || !room?.started) {
       pendingTurnNotificationRef.current = false;
-      return;
+      return undefined;
     }
 
     if (becameMyTurn || startedWithMyTurn) {
-      // Alleen een echte beurtwissel of het daadwerkelijk starten van de
-      // eerste vraag mag een melding klaarzetten.
       pendingTurnNotificationRef.current = document.visibilityState === "hidden";
     }
 
@@ -2228,18 +2245,36 @@ const matchStartedAt = isOnlineRoom
       turnNotificationKeyRef.current = notificationKey;
       pendingTurnNotificationRef.current = false;
 
+      const notificationUrl = new URL(window.location.href);
+      notificationUrl.searchParams.set("room", roomCode);
+
       try {
         await showBrowserNotification("PimPamPof: jij bent aan de beurt", {
           body: `${onlineQuestion || "De volgende vraag staat klaar."} Letter: ${room.lastLetter || "?"}`,
           tag: `pimpampof-turn-${roomCode}`,
           requireInteraction: true,
+          data: { url: notificationUrl.toString(), roomCode },
         });
       } catch (error) {
         console.warn("Kon beurtnotificatie niet tonen", error);
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== "hidden") return;
+      if (!room?.started || room?.paused || room?.phase !== "answer") return;
+      if (room?.turn !== playerId) return;
+
+      // Ook wanneer de vraag al zichtbaar was, moet het verlaten van de app
+      // tijdens de eigen beurt alsnog een melding veroorzaken.
+      pendingTurnNotificationRef.current = true;
+      void showPendingTurnNotification();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     void showPendingTurnNotification();
+
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [
     turnNotificationsEnabled,
     notificationPermission,
