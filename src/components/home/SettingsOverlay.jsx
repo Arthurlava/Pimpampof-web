@@ -3,7 +3,7 @@ import { Button } from "../common/Button";
 const THEMES = [
   { id: "green", label: "Groen" },
   { id: "blue", label: "Blauw" },
-  { id: "orange", label: "Oranje" },
+  { id: "drakred", label: "DarkRed" },
   { id: "purple", label: "Paars" },
 ];
 
