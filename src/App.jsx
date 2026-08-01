@@ -349,6 +349,7 @@ function applyOfflineLetter(val, actionAt = Date.now()) {
 function offlineJilla() {
   if (!offlineSolo) return;
   if (!offOrder || offOrder.length === 0) return;
+  if (!window.confirm(`Weet je zeker dat je Jilla wilt gebruiken? Dit kost ${JILLA_PENALTY} punten.`)) return;
 
   setOffScore(s => s - JILLA_PENALTY);
   setOffJillaCount(c => c + 1);
@@ -685,6 +686,7 @@ function changeOfflineMultiLastLetter() {
 function offlineMultiJilla() {
   if (!offlineMulti || offmPaused || offmPhase !== "answer") return;
   if (!offmPlayers.length || !offmOrder.length) return;
+  if (!window.confirm(`Weet je zeker dat je Jilla wilt gebruiken? Dit kost ${JILLA_PENALTY} punten en je mist een beurt.`)) return;
 
   setOffmLastAction(null);
   const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
@@ -1920,6 +1922,11 @@ async function submitLetterOnline(letter, actionAt = Date.now()) {
 
  async function useJilla() {
   if (!room || room.paused) return;
+
+  const message = room.solo
+    ? `Weet je zeker dat je Jilla wilt gebruiken? Dit kost ${JILLA_PENALTY} punten.`
+    : `Weet je zeker dat je Jilla wilt gebruiken? Dit kost ${JILLA_PENALTY} punten en je mist een beurt.`;
+  if (!window.confirm(message)) return;
 
   const r = ref(db, `rooms/${roomCode}`);
   await runTransaction(r, (data) => {
