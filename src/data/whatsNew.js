@@ -2,6 +2,18 @@ export const WHATS_NEW = {
   latestCount: 1,
   updates: [
     {
+      updatedAtLabel: "1 aug 2026",
+      items: [
+        "Offline multiplayer heeft nu pauzeren en hervatten.",
+        "Offline multiplayer heeft nu knoppen om een verkeerde letter te corrigeren of het laatste antwoord terug te draaien.",
+        "Hosts kunnen de cooldown tussen beurten instellen van 0 tot 20 seconden.",
+        "Spelinstellingen worden lokaal onthouden voor volgende rooms en offline spellen.",
+        "De spelers in een online room worden nu direct bovenaan de lobby getoond.",
+        "Bugreports en feedback kunnen via Instellingen worden ingestuurd en bekeken.",
+        "Optionele klikbare browsernotificaties toegevoegd wanneer je online weer aan de beurt bent.",
+      ],
+    },
+    {
       updatedAtLabel: "9 Jun 2026",
       items: [
         "Bug gefixed met het inputveld van de hoeveelheid offline multiplayer spelers.",

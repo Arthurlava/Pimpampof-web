@@ -3,7 +3,7 @@ import { Button } from "../common/Button";
 const THEMES = [
   { id: "green", label: "Groen" },
   { id: "blue", label: "Blauw" },
-  { id: "drakred", label: "DarkRed" },
+  { id: "darkred", label: "DarkRed" },
   { id: "purple", label: "Paars" },
 ];
 
@@ -11,8 +11,15 @@ export function SettingsOverlay({
   open,
   theme,
   reportCount = 0,
+  feedbackCount = 0,
+  notificationsSupported = false,
+  notificationsEnabled = false,
+  notificationPermission = "default",
   onThemeChange,
   onOpenReports,
+  onOpenFeedbackForm,
+  onOpenFeedbackReports,
+  onToggleNotifications,
   onOpenTutorial,
   onClose,
 }) {
@@ -54,6 +61,37 @@ export function SettingsOverlay({
           <Button variant="alt" onClick={onOpenReports}>
             Bekijk rapportages{reportCount > 0 ? ` (${reportCount})` : ""}
           </Button>
+        </div>
+
+        <div className="settings-section">
+          <h3 style={{ margin: "0 0 10px 0" }}>Bug melden en feedback</h3>
+          <p className="muted" style={{ margin: "0 0 10px 0" }}>
+            Stuur een bugreport of idee in. Inzendingen worden net als combinatierapportages opgeslagen.
+          </p>
+
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <Button onClick={onOpenFeedbackForm}>Nieuwe inzending</Button>
+            <Button variant="alt" onClick={onOpenFeedbackReports}>
+              Bekijk inzendingen{feedbackCount > 0 ? ` (${feedbackCount})` : ""}
+            </Button>
+          </div>
+        </div>
+
+        <div className="settings-section">
+          <h3 style={{ margin: "0 0 10px 0" }}>Beurtnotificaties</h3>
+          <p className="muted" style={{ margin: "0 0 10px 0" }}>
+            Toon een klikbare browsernotificatie wanneer je online weer aan de beurt bent en deze pagina niet zichtbaar is.
+          </p>
+
+          {!notificationsSupported ? (
+            <span className="muted">Deze browser ondersteunt geen notificaties.</span>
+          ) : notificationPermission === "denied" ? (
+            <span className="muted">Notificaties zijn geblokkeerd. Sta ze toe via de site-instellingen van je browser.</span>
+          ) : (
+            <Button variant={notificationsEnabled ? "stop" : "alt"} onClick={onToggleNotifications}>
+              {notificationsEnabled ? "Notificaties uitschakelen" : "Notificaties inschakelen"}
+            </Button>
+          )}
         </div>
 
         <div className="settings-section">

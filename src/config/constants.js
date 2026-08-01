@@ -3,6 +3,8 @@ export const MAX_POINTS = 200;
 export const DOUBLE_POF_BONUS = 100;
 export const JILLA_PENALTY = 25;
 export const COOLDOWN_MS = 5000;
+export const GAME_SETTINGS_KEY = "ppp.hostGameSettings.v1";
+export const TURN_NOTIFICATIONS_KEY = "ppp.turnNotifications.v1";
 export const OFFLINE_MULTI_MAX_PLAYERS = 20;
 
 export const URL_DIEREN = import.meta.env.VITE_DIERENSPEL_URL || "https://dierenspel-mtul.vercel.app/";

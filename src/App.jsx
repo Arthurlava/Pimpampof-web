@@ -9,6 +9,7 @@ import "./styles/global.css";
 import { auth, db, AUTH_READY_EVENT } from "./config/firebase";
 import {
   COOLDOWN_MS,
+  GAME_SETTINGS_KEY,
   DOUBLE_POF_BONUS,
   JILLA_PENALTY,
   MAX_TIME_MS,
@@ -18,6 +19,7 @@ import {
   PRIOR_MEAN,
   PRIOR_WEIGHT,
   STALE_ROOM_MS,
+  TURN_NOTIFICATIONS_KEY,
   URL_DIEREN,
   WHATS_NEW_COLLAPSE_KEY,
   WORDCHECK_AI_ENDPOINT,
@@ -36,6 +38,7 @@ import { SettingsOverlay } from "./components/home/SettingsOverlay";
 import { MainMenuPanel } from "./components/home/MainMenuPanel";
 import { QuestionManager } from "./components/questions/QuestionManager";
 import { RoomBrowser } from "./components/online/RoomBrowser";
+import { RoomLobbyPlayers } from "./components/online/RoomLobbyPlayers";
 import { ProfileOverlay } from "./components/profile/ProfileOverlay";
 import { WordCheckOverlay } from "./components/word-check/WordCheckOverlay";
 import { OfflineMultiSetup } from "./components/offline/OfflineMultiSetup";
@@ -45,6 +48,8 @@ import { PofToast } from "./components/feedback/PofToast";
 import { ScoreToast } from "./components/feedback/ScoreToast";
 import { ImpossibleComboReportOverlay } from "./components/reports/ImpossibleComboReportOverlay";
 import { ImpossibleReportsReviewOverlay } from "./components/reports/ImpossibleReportsReviewOverlay";
+import { FeedbackReportOverlay } from "./components/reports/FeedbackReportOverlay";
+import { FeedbackReportsReviewOverlay } from "./components/reports/FeedbackReportsReviewOverlay";
 import {
   calcPoints,
   canLeaveRoom,
@@ -68,8 +73,29 @@ import {
   normalizeComboQuestion,
 } from "./utils/impossibleCombos";
 import { TutorialOverlay } from "./components/settings/TutorialOverlay";
+import { GameSettingsOverlay } from "./components/settings/GameSettingsOverlay";
 
 const LETTER_CONFIRM_MS = 3000;
+
+function normalizeCooldownSeconds(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return COOLDOWN_MS / 1000;
+  return Math.max(0, Math.min(20, Math.round(parsed)));
+}
+
+function readHostGameSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(GAME_SETTINGS_KEY) || "{}");
+    return { cooldownSeconds: normalizeCooldownSeconds(parsed.cooldownSeconds) };
+  } catch {
+    return { cooldownSeconds: COOLDOWN_MS / 1000 };
+  }
+}
+
+function roomCooldownMs(data) {
+  const configured = Number(data?.settings?.cooldownMs);
+  return Number.isFinite(configured) && configured >= 0 ? configured : COOLDOWN_MS;
+}
 
 /* ---------- App ---------- */
 export default function PimPamPofWeb() {
@@ -111,13 +137,42 @@ export default function PimPamPofWeb() {
   const [impossibleReports, setImpossibleReports] = useState({});
   const [approvedImpossibleCombos, setApprovedImpossibleCombos] = useState({});
   const [impossibleComboBackups, setImpossibleComboBackups] = useState({});
+  const [feedbackReports, setFeedbackReports] = useState({});
+  const [feedbackDialogOpen, setFeedbackDialogOpen] = useState(false);
+  const [feedbackReviewOpen, setFeedbackReviewOpen] = useState(false);
+  const [feedbackType, setFeedbackType] = useState("bug");
+  const [feedbackTitle, setFeedbackTitle] = useState("");
+  const [feedbackMessage, setFeedbackMessage] = useState("");
+  const [feedbackBusy, setFeedbackBusy] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(false);
   const [letterConfirm, setLetterConfirm] = useState(null);
+  const [gameSettingsOpen, setGameSettingsOpen] = useState(false);
+  const [hostGameSettings, setHostGameSettings] = useState(readHostGameSettings);
+  const [turnNotificationsEnabled, setTurnNotificationsEnabled] = useState(() => {
+    try {
+      return typeof Notification !== "undefined"
+        && Notification.permission === "granted"
+        && localStorage.getItem(TURN_NOTIFICATIONS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [notificationPermission, setNotificationPermission] = useState(() =>
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission
+  );
 
   useEffect(() => {
     document.body.dataset.theme = theme;
     localStorage.setItem("ppp.theme", theme);
   }, [theme]);
+
+  useEffect(() => {
+    try { localStorage.setItem(GAME_SETTINGS_KEY, JSON.stringify(hostGameSettings)); } catch { /* opslag kan geblokkeerd zijn */ }
+  }, [hostGameSettings]);
+
+  useEffect(() => {
+    try { localStorage.setItem(TURN_NOTIFICATIONS_KEY, turnNotificationsEnabled ? "1" : "0"); } catch { /* opslag kan geblokkeerd zijn */ }
+  }, [turnNotificationsEnabled]);
 
   // playerId = auth.uid (wacht tot anonieme login klaar is)
   const [playerId, setPlayerId] = useState(null);
@@ -156,6 +211,15 @@ export default function PimPamPofWeb() {
     const backupsRef = ref(db, "impossibleComboBackups");
     const unsubscribe = onValue(backupsRef, (snap) => {
       setImpossibleComboBackups(snap.val() || {});
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const feedbackRef = ref(db, "feedbackReports");
+    const unsubscribe = onValue(feedbackRef, (snap) => {
+      setFeedbackReports(snap.val() || {});
     });
 
     return () => unsubscribe();
@@ -282,6 +346,10 @@ const [offmTurnIx, setOffmTurnIx] = useState(0);
 const [offmTurnStartAt, setOffmTurnStartAt] = useState(null);
 const [offmCooldownEndAt, setOffmCooldownEndAt] = useState(null);
 const [offmStartedAt, setOffmStartedAt] = useState(null);
+const [offmCooldownMs, setOffmCooldownMs] = useState(COOLDOWN_MS);
+const [offmPaused, setOffmPaused] = useState(false);
+const [offmPausedAt, setOffmPausedAt] = useState(null);
+const [offmLastAction, setOffmLastAction] = useState(null);
 
 const [offmScores, setOffmScores] = useState({});
 const [offmStats, setOffmStats] = useState({});
@@ -326,6 +394,10 @@ function stopOfflineMulti() {
   setOffmTurnStartAt(null);
   setOffmCooldownEndAt(null);
   setOffmStartedAt(null);
+  setOffmCooldownMs(COOLDOWN_MS);
+  setOffmPaused(false);
+  setOffmPausedAt(null);
+  setOffmLastAction(null);
   setOffmScores({});
   setOffmStats({});
   setOffmJail({});
@@ -353,9 +425,11 @@ function computeNextTurnIxWithJail(players, currentIx, jailMap) {
   return { nextIx: (currentIx + 1) % len, nextJail };
 }
 
-function startOfflineMultiFromSetup() {
-const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
-  const rawNames = (offmNames || []).slice(0, n).map(s => String(s || "").trim());
+function startOfflineMultiFromSetup(setup = {}) {
+  const selectedCount = setup.playerCount ?? offmPlayerCount;
+  const selectedNames = setup.names ?? offmNames;
+  const n = clampInt(selectedCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
+  const rawNames = (selectedNames || []).slice(0, n).map(s => String(s || "").trim());
   const names = rawNames.map((nm, i) => nm || `Speler ${i + 1}`);
   const players = names.map(name => ({ id: createId(), name }));
 
@@ -387,6 +461,10 @@ const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
   setOffmTurnStartAt(t);
   setOffmCooldownEndAt(null);
   setOffmStartedAt(t);
+  setOffmCooldownMs(normalizeCooldownSeconds(hostGameSettings.cooldownSeconds) * 1000);
+  setOffmPaused(false);
+  setOffmPausedAt(null);
+  setOffmLastAction(null);
 
   setOffmJillaLast(null);
   setOffmSetupOpen(false);
@@ -395,8 +473,16 @@ const n = clampInt(offmPlayerCount, 2, OFFLINE_MULTI_MAX_PLAYERS);
 }
 
 function beginOffmCooldown() {
+  const nowTs = Date.now();
+  if (offmCooldownMs <= 0) {
+    setOffmPhase("answer");
+    setOffmCooldownEndAt(null);
+    setOffmTurnStartAt(nowTs);
+    return;
+  }
+
   setOffmPhase("cooldown");
-  setOffmCooldownEndAt(Date.now() + COOLDOWN_MS);
+  setOffmCooldownEndAt(nowTs + offmCooldownMs);
   setOffmTurnStartAt(null);
 }
 
@@ -404,7 +490,7 @@ function onOfflineMultiLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
   if (val.length !== 1) return;
 
-  if (!offlineMulti || offmPhase !== "answer") { e.target.value = ""; return; }
+  if (!offlineMulti || offmPaused || offmPhase !== "answer") { e.target.value = ""; return; }
   if (!offmPlayers.length || !offmOrder.length) { e.target.value = ""; return; }
 
   setLetterConfirm({ mode: "offline-multi", letter: val, startedAt: Date.now() });
@@ -412,7 +498,7 @@ function onOfflineMultiLetterChanged(e) {
 }
 
 function applyOfflineMultiLetter(val, actionAt = Date.now()) {
-  if (!offlineMulti || offmPhase !== "answer") return;
+  if (!offlineMulti || offmPaused || offmPhase !== "answer") return;
   if (!offmPlayers.length || !offmOrder.length) return;
 
   const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
@@ -424,6 +510,28 @@ function applyOfflineMultiLetter(val, actionAt = Date.now()) {
   const basePoints = calcPoints(elapsed);
   const bonus = isDouble ? DOUBLE_POF_BONUS : 0;
   const gain = basePoints + bonus;
+
+  setOffmLastAction({
+    type: "answer",
+    by: cur.id,
+    required,
+    wasDouble: !!isDouble,
+    snapshot: {
+      index: offmIndex,
+      lastLetter: offmLastLetter,
+      turnIx: offmTurnIx,
+      phase: offmPhase,
+      turnStartAt: offmTurnStartAt,
+      turnElapsedMs: elapsed,
+      cooldownEndAt: offmCooldownEndAt,
+      scores: { ...(offmScores || {}) },
+      stats: Object.fromEntries(
+        Object.entries(offmStats || {}).map(([id, stat]) => [id, { ...(stat || {}) }])
+      ),
+      jail: { ...(offmJail || {}) },
+      jillaLast: offmJillaLast ? { ...offmJillaLast } : null,
+    },
+  });
 
   setOffmScores(s => ({ ...s, [cur.id]: (s[cur.id] || 0) + gain }));
   setOffmStats(st => {
@@ -457,10 +565,102 @@ function applyOfflineMultiLetter(val, actionAt = Date.now()) {
   }
 }
 
+function pauseOfflineMulti() {
+  if (!offlineMulti || offmPaused) return;
+  const pausedAt = Date.now();
+  if (letterConfirm?.mode === "offline-multi") {
+    const confirmDuration = Math.max(0, pausedAt - (letterConfirm.startedAt || pausedAt));
+    if (offmTurnStartAt) setOffmTurnStartAt((start) => (start ? start + confirmDuration : start));
+    if (offmStartedAt) setOffmStartedAt((start) => (start ? start + confirmDuration : start));
+    setLetterConfirm(null);
+  }
+  setOffmPaused(true);
+  setOffmPausedAt(pausedAt);
+}
+
+function resumeOfflineMulti() {
+  if (!offlineMulti || !offmPaused) return;
+  const resumedAt = Date.now();
+  const pausedFor = Math.max(0, resumedAt - (offmPausedAt || resumedAt));
+
+  if (offmTurnStartAt) setOffmTurnStartAt(offmTurnStartAt + pausedFor);
+  if (offmCooldownEndAt) setOffmCooldownEndAt(offmCooldownEndAt + pausedFor);
+  if (offmStartedAt) setOffmStartedAt(offmStartedAt + pausedFor);
+
+  setOffmPaused(false);
+  setOffmPausedAt(null);
+  setTimeout(() => letterRef.current?.focus(), 0);
+}
+
+function cancelOfflineMultiLastAnswer() {
+  const action = offmLastAction;
+  const snapshot = action?.snapshot;
+  if (!snapshot) return;
+
+  setLetterConfirm(null);
+  setOffmIndex(snapshot.index);
+  setOffmLastLetter(snapshot.lastLetter);
+  setOffmTurnIx(snapshot.turnIx);
+  setOffmPhase(snapshot.phase);
+  setOffmTurnStartAt(Number.isFinite(snapshot.turnElapsedMs)
+    ? Date.now() - snapshot.turnElapsedMs
+    : snapshot.turnStartAt);
+  setOffmCooldownEndAt(snapshot.cooldownEndAt);
+  setOffmScores(snapshot.scores || {});
+  setOffmStats(snapshot.stats || {});
+  setOffmJail(snapshot.jail || {});
+  setOffmJillaLast(snapshot.jillaLast || null);
+  setOffmLastAction(null);
+  triggerScoreToast("Laatste antwoord teruggedraaid", "minus");
+  setTimeout(() => letterRef.current?.focus(), 0);
+}
+
+function changeOfflineMultiLastLetter() {
+  if (!offlineMulti) return;
+  const raw = window.prompt("Nieuwe laatste letter (A–Z):", offmLastLetter || "");
+  const val = normalizeLetter(raw);
+  if (val.length !== 1) return;
+
+  const action = offmLastAction;
+  if (action?.type === "answer" && action.by) {
+    const nowDouble = !!action.required && action.required === val;
+    const wasDouble = !!action.wasDouble;
+
+    if (nowDouble !== wasDouble) {
+      const delta = nowDouble ? DOUBLE_POF_BONUS : -DOUBLE_POF_BONUS;
+      setOffmScores((scores) => ({
+        ...scores,
+        [action.by]: Math.max(0, (scores[action.by] || 0) + delta),
+      }));
+      setOffmStats((stats) => {
+        const current = stats[action.by] || { totalTimeMs: 0, answeredCount: 0, jillaCount: 0, doubleCount: 0 };
+        return {
+          ...stats,
+          [action.by]: {
+            ...current,
+            doubleCount: Math.max(0, (current.doubleCount || 0) + (nowDouble ? 1 : -1)),
+          },
+        };
+      });
+      setOffmLastAction({ ...action, wasDouble: nowDouble });
+
+      if (nowDouble) {
+        triggerPof(`Dubble pof (correctie)! +${DOUBLE_POF_BONUS}`);
+        triggerScoreToast(`+${DOUBLE_POF_BONUS} punten (correctie)`, "plus");
+      } else {
+        triggerScoreToast(`-${DOUBLE_POF_BONUS} punten (correctie)`, "minus");
+      }
+    }
+  }
+
+  setOffmLastLetter(val);
+}
+
 function offlineMultiJilla() {
-  if (!offlineMulti || offmPhase !== "answer") return;
+  if (!offlineMulti || offmPaused || offmPhase !== "answer") return;
   if (!offmPlayers.length || !offmOrder.length) return;
 
+  setOffmLastAction(null);
   const cur = offmPlayers[clampInt(offmTurnIx, 0, offmPlayers.length - 1)];
 
   setOffmScores(s => ({ ...s, [cur.id]: (s[cur.id] || 0) - JILLA_PENALTY }));
@@ -644,7 +844,8 @@ function skipImpossibleComboQuestion() {
   }
 
   if (offlineMulti) {
-    if (offmPhase !== "answer" || !offmOrder.length) return;
+    if (offmPaused || offmPhase !== "answer" || !offmOrder.length) return;
+    setOffmLastAction(null);
     setOffmIndex((index) => (index + 1) % offmOrder.length);
     setOffmTurnStartAt(nowTs);
     triggerScoreToast("Nieuwe vraag geladen", "plus");
@@ -799,6 +1000,105 @@ async function rollbackImpossibleBackup(backup) {
 }
 
 
+async function submitFeedbackReport() {
+  const cleanTitle = String(feedbackTitle || "").trim();
+  const cleanMessage = String(feedbackMessage || "").trim();
+
+  if (!cleanTitle || !cleanMessage) {
+    alert("Vul een titel en beschrijving in.");
+    return;
+  }
+  if (!online) {
+    alert("Je bent offline — de inzending kan nu niet worden verstuurd.");
+    return;
+  }
+
+  setFeedbackBusy(true);
+  try {
+    const reportId = createId();
+    await set(ref(db, `feedbackReports/${reportId}`), {
+      type: feedbackType === "feedback" ? "feedback" : "bug",
+      title: cleanTitle.slice(0, 100),
+      message: cleanMessage.slice(0, 4000),
+      reportedById: playerId || null,
+      reportedByName: playerName || "Anoniem",
+      createdAt: Date.now(),
+      status: "open",
+    });
+
+    setFeedbackDialogOpen(false);
+    setFeedbackTitle("");
+    setFeedbackMessage("");
+    triggerScoreToast("Bedankt, je inzending is opgeslagen", "plus");
+  } catch (error) {
+    console.error("Kon feedback niet opslaan", error);
+    alert("Kon de inzending niet opslaan. Controleer je verbinding of Firebase regels.");
+  } finally {
+    setFeedbackBusy(false);
+  }
+}
+
+async function resolveFeedbackReport(report) {
+  if (!report?.key) return;
+  try {
+    await update(ref(db, `feedbackReports/${report.key}`), {
+      status: "resolved",
+      resolvedAt: Date.now(),
+      resolvedBy: playerName || "Admin",
+    });
+  } catch (error) {
+    console.error("Kon inzending niet afhandelen", error);
+    alert("Kon de inzending niet bijwerken.");
+  }
+}
+
+async function deleteFeedbackReport(report) {
+  if (!report?.key) return;
+  if (!confirm("Deze inzending verwijderen?")) return;
+  try {
+    await remove(ref(db, `feedbackReports/${report.key}`));
+  } catch (error) {
+    console.error("Kon inzending niet verwijderen", error);
+    alert("Kon de inzending niet verwijderen.");
+  }
+}
+
+async function updateHostCooldownSeconds(value) {
+  const cooldownSeconds = normalizeCooldownSeconds(value);
+  setHostGameSettings((current) => ({ ...current, cooldownSeconds }));
+
+  if (roomCode && room && isHost && !room.started) {
+    try {
+      await update(ref(db, `rooms/${roomCode}/settings`), {
+        cooldownMs: cooldownSeconds * 1000,
+      });
+    } catch (error) {
+      console.error("Kon cooldown niet synchroniseren", error);
+      alert("De instelling is lokaal opgeslagen, maar kon niet naar de room worden gestuurd.");
+    }
+  }
+}
+
+async function toggleTurnNotifications() {
+  if (typeof Notification === "undefined") return;
+
+  if (turnNotificationsEnabled) {
+    setTurnNotificationsEnabled(false);
+    return;
+  }
+
+  try {
+    let permission = Notification.permission;
+    if (permission === "default") permission = await Notification.requestPermission();
+    setNotificationPermission(permission);
+    setTurnNotificationsEnabled(permission === "granted");
+  } catch (error) {
+    console.warn("Kon notificatietoestemming niet aanvragen", error);
+    setTurnNotificationsEnabled(false);
+  }
+}
+
+
   // ONLINE
   const [roomCodeInput, setRoomCodeInput] = useState("");
   const [roomCode, setRoomCode] = useState("");
@@ -812,6 +1112,7 @@ async function rollbackImpossibleBackup(backup) {
   const letterRef = useRef(null);
   const connIdRef = useRef(null);
   const roomUnsubRef = useRef(null); // holds onValue unsubscribe
+  const turnNotificationKeyRef = useRef(null);
 
   // UI toasts
   const [pofShow, setPofShow] = useState(false);
@@ -964,6 +1265,9 @@ function attachRoomListener(code) {
       scores: {},
       stats: {},
       usedLetters: {},
+      settings: {
+        cooldownMs: normalizeCooldownSeconds(hostGameSettings.cooldownSeconds) * 1000,
+      },
       paused: false,
       pausedAt: null,
       phase: "answer",
@@ -971,7 +1275,7 @@ function attachRoomListener(code) {
       cooldownEndAt: null,
       startedAt: null,
       startOrder: null,
-      version: 5
+      version: 6
     };
 
     const path = `rooms/${code}`;
@@ -1031,6 +1335,10 @@ function attachRoomListener(code) {
       if (!data.jail) data.jail = {};
       if (!data.scores) data.scores = {};
       if (!data.stats) data.stats = {};
+      if (!data.settings) data.settings = { cooldownMs: COOLDOWN_MS };
+      if (!Number.isFinite(Number(data.settings.cooldownMs)) || Number(data.settings.cooldownMs) < 0) {
+        data.settings.cooldownMs = COOLDOWN_MS;
+      }
       if (data.paused == null) { data.paused = false; data.pausedAt = null; }
       if (data.finished == null) data.finished = false;
 
@@ -1457,9 +1765,16 @@ async function submitLetterOnline(letter, actionAt = Date.now()) {
       data.turnStartAt = Date.now();
       data.cooldownEndAt = null;
     } else {
-      data.phase = "cooldown";
-      data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-      data.turnStartAt = null;
+      const cooldownMs = roomCooldownMs(data);
+      if (cooldownMs <= 0) {
+        data.phase = "answer";
+        data.cooldownEndAt = null;
+        data.turnStartAt = Date.now();
+      } else {
+        data.phase = "cooldown";
+        data.cooldownEndAt = Date.now() + cooldownMs;
+        data.turnStartAt = null;
+      }
     }
 
     data.lastAction = { type: "answer", by: playerId, at: Date.now(), prev };
@@ -1582,9 +1897,16 @@ async function submitLetterOnline(letter, actionAt = Date.now()) {
       data.turnStartAt = Date.now();
       data.cooldownEndAt = null;
     } else {
-      data.phase = "cooldown";
-      data.cooldownEndAt = Date.now() + COOLDOWN_MS;
-      data.turnStartAt = null;
+      const cooldownMs = roomCooldownMs(data);
+      if (cooldownMs <= 0) {
+        data.phase = "answer";
+        data.cooldownEndAt = null;
+        data.turnStartAt = Date.now();
+      } else {
+        data.phase = "cooldown";
+        data.cooldownEndAt = Date.now() + cooldownMs;
+        data.turnStartAt = null;
+      }
     }
 
     advanceTurnWithJail(data);
@@ -1743,7 +2065,7 @@ async function submitLetterOnline(letter, actionAt = Date.now()) {
   }, [roomCode, room?.phase, room?.cooldownEndAt, room?.paused, now, room]);
 
  useEffect(() => {
-  if (!offlineMulti) return;
+  if (!offlineMulti || offmPaused) return;
   if (offmPhase !== "cooldown") return;
   if (!offmCooldownEndAt) return;
 
@@ -1754,7 +2076,7 @@ async function submitLetterOnline(letter, actionAt = Date.now()) {
     setOffmCooldownEndAt(null);
     setTimeout(() => letterRef.current?.focus(), 0);
   }
-}, [offlineMulti, offmPhase, offmCooldownEndAt, now]);
+}, [offlineMulti, offmPaused, offmPhase, offmCooldownEndAt, now]);
 
   /* UI helpers voor render */
   const isOnlineRoom = !!roomCode;
@@ -1777,9 +2099,10 @@ const offElapsedMs = (offlineSolo && offTurnStartAt) ? Math.max(0, offTimerNow -
 const offPotentialPoints = offlineSolo ? calcPoints(offElapsedMs) : 0;
 const offmInCooldown = offlineMulti && offmPhase === "cooldown";
 const offmTimerNow = letterConfirm?.mode === "offline-multi" ? (letterConfirm.startedAt || now) : now;
-const offmCooldownLeftMs = Math.max(0, (offmCooldownEndAt || 0) - now);
+const offmEffectiveNow = offmPaused ? (offmPausedAt || now) : offmTimerNow;
+const offmCooldownLeftMs = Math.max(0, (offmCooldownEndAt || 0) - offmEffectiveNow);
 const offmElapsedMs = (offlineMulti && offmPhase === "answer" && offmTurnStartAt)
-  ? Math.max(0, offmTimerNow - offmTurnStartAt) : 0;
+  ? Math.max(0, offmEffectiveNow - offmTurnStartAt) : 0;
 const offmPotentialPoints = offlineMulti ? calcPoints(offmElapsedMs) : 0;
 
 
@@ -1803,9 +2126,47 @@ const matchStartedAt = isOnlineRoom
   ? (room?.startedAt || room?.createdAt || null)
   : (offlineMulti ? offmStartedAt : (offlineSolo ? offStartedAt : null));
 
+  const matchNow = offlineMulti ? offmEffectiveNow : (offlineSolo ? offTimerNow : effectiveNow);
   const matchDurationMs = matchStartedAt
-    ? (effectiveNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
+    ? (matchNow - (typeof matchStartedAt === "number" ? matchStartedAt : Date.now()))
     : 0;
+
+  useEffect(() => {
+    if (!turnNotificationsEnabled || notificationPermission !== "granted") return;
+    if (!roomCode || !room?.started || room?.paused || room?.phase !== "answer") return;
+    if (room?.turn !== playerId || document.visibilityState === "visible") return;
+
+    const notificationKey = `${roomCode}:${room.turnStartAt ?? room.currentIndex ?? 0}:${room.turn}`;
+    if (turnNotificationKeyRef.current === notificationKey) return;
+    turnNotificationKeyRef.current = notificationKey;
+
+    try {
+      const notification = new Notification("PimPamPof: jij bent aan de beurt", {
+        body: `${onlineQuestion || "De volgende vraag staat klaar."} Letter: ${room.lastLetter || "?"}`,
+        tag: `pimpampof-turn-${roomCode}`,
+      });
+
+      notification.onclick = () => {
+        window.focus();
+        notification.close();
+      };
+    } catch (error) {
+      console.warn("Kon beurtnotificatie niet tonen", error);
+    }
+  }, [
+    turnNotificationsEnabled,
+    notificationPermission,
+    roomCode,
+    room?.started,
+    room?.paused,
+    room?.phase,
+    room?.turn,
+    room?.currentIndex,
+    room?.turnStartAt,
+    room?.lastLetter,
+    playerId,
+    onlineQuestion,
+  ]);
 
   const dialogOpen =
     leaderOpen ||
@@ -1814,6 +2175,9 @@ const matchStartedAt = isOnlineRoom
     tutorialOpen ||
     profileOpen ||
     reportReviewOpen ||
+    feedbackDialogOpen ||
+    feedbackReviewOpen ||
+    gameSettingsOpen ||
     !!reportDialog ||
     !!offlineResult ||
     offmSetupOpen ||
@@ -1865,6 +2229,11 @@ const matchStartedAt = isOnlineRoom
   const impossibleBackups = Object.entries(impossibleComboBackups || {})
     .map(([key, value]) => ({ key, ...(value || {}) }))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+  const feedbackReportList = Object.entries(feedbackReports || {})
+    .map(([key, value]) => ({ key, ...(value || {}) }))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  const openFeedbackCount = feedbackReportList.filter((report) => report.status !== "resolved").length;
 
 function onLetterChanged(e) {
   const val = normalizeLetter(e.target.value);
@@ -1922,7 +2291,7 @@ async function confirmLetter() {
     return;
   }
 
-  if (mode === "offline-multi" && offlineMulti && offmPhase === "answer") {
+  if (mode === "offline-multi" && offlineMulti && !offmPaused && offmPhase === "answer") {
     applyOfflineMultiLetter(letter, actionAt);
     setTimeout(() => letterRef.current?.focus(), 0);
     return;
@@ -2045,7 +2414,12 @@ function renderLetterConfirm(mode) {
 
           <Row className="top-game-row">
             {isOnlineRoom && online && isHost && !room?.started && (
-              <Button onClick={startSpelOnline}>Start spel (online)</Button>
+              <>
+                <Button variant="alt" onClick={() => setGameSettingsOpen(true)}>
+                  ⚙️ Spelinstellingen ({Math.round(roomCooldownMs(room) / 1000)}s)
+                </Button>
+                <Button onClick={startSpelOnline}>Start spel (online)</Button>
+              </>
             )}
             {isOnlineRoom && online && !isHost && !room?.started && (
               <span className="muted">Wachten op host…</span>
@@ -2053,7 +2427,9 @@ function renderLetterConfirm(mode) {
             {isOnlineRoom && room?.started && (
               <>
                 <span className="muted">
-                  {room.solo ? "Solo modus." : "Multiplayer — timer & punten actief (5s cooldown)."}
+                  {room.solo
+                    ? "Solo modus."
+                    : `Multiplayer — timer & punten actief (${Math.round(roomCooldownMs(room) / 1000)}s cooldown).`}
                 </span>
                 {room.paused
                   ? <Button onClick={resumeGame}>▶️ Hervatten</Button>
@@ -2067,6 +2443,23 @@ function renderLetterConfirm(mode) {
               </>
             )}
 
+            {offlineMulti && (
+              <>
+                <span className="muted">
+                  Offline multiplayer ({Math.round(offmCooldownMs / 1000)}s cooldown).
+                </span>
+                {offmPaused
+                  ? <Button onClick={resumeOfflineMulti}>▶️ Hervatten</Button>
+                  : <Button variant="alt" onClick={pauseOfflineMulti}>⏸️ Pauzeer</Button>}
+                <Button variant="alt" onClick={openWordCheck}>Check woord</Button>
+                <Button onClick={changeOfflineMultiLastLetter}>🔤 Verander letter</Button>
+                {offmLastAction?.type === "answer" && (
+                  <Button variant="stop" onClick={cancelOfflineMultiLastAnswer}>↩️ Verkeerde letter / antwoord terug</Button>
+                )}
+                {offmPaused && <span className="badge">⏸️ Gepauzeerd</span>}
+              </>
+            )}
+
             {!online && !offlineSolo && <span className="muted">start Solo</span>}
           </Row>
           {(offlineSolo || offlineMulti || (isOnlineRoom && room?.started)) && (
@@ -2076,6 +2469,10 @@ function renderLetterConfirm(mode) {
             </div>
           )}
         </header>
+        {isOnlineRoom && !room?.started && (
+          <RoomLobbyPlayers room={room} roomCode={roomCode} />
+        )}
+
         {!isOnlineRoom && !offlineSolo && !offlineMulti && (
           <MainMenuPanel
             online={online}
@@ -2216,6 +2613,8 @@ function renderLetterConfirm(mode) {
           Beurt: <b>{offmPlayers?.[offmTurnIx]?.name ?? "Speler"}</b>
         </div>
 
+        {offmPaused && <div className="badge">⏸️ Gepauzeerd — timer en cooldown staan stil</div>}
+
         {offmInCooldown ? (
           <div className="badge">
             ⏳ Volgende beurt over {Math.ceil(offmCooldownLeftMs / 1000)}s
@@ -2253,23 +2652,27 @@ function renderLetterConfirm(mode) {
             inputMode="text"
             maxLength={1}
             onChange={onOfflineMultiLetterChanged}
-            placeholder={offmInCooldown ? "Wachten…" : (letterConfirm?.mode === "offline-multi" ? "Wacht of annuleer…" : "Typ de laatste letter…")}
-            disabled={offmInCooldown || letterConfirm?.mode === "offline-multi"}
+            placeholder={offmPaused
+              ? "Gepauzeerd…"
+              : (offmInCooldown
+                ? "Wachten…"
+                : (letterConfirm?.mode === "offline-multi" ? "Wacht of annuleer…" : "Typ de laatste letter…"))}
+            disabled={offmPaused || offmInCooldown || letterConfirm?.mode === "offline-multi"}
             style={{
               ...styles.letterInput,
-              opacity: (offmInCooldown || letterConfirm?.mode === "offline-multi") ? 0.5 : 1
+              opacity: (offmPaused || offmInCooldown || letterConfirm?.mode === "offline-multi") ? 0.5 : 1
             }}
           />
           {renderLetterConfirm("offline-multi")}
         </div>
 
-        {!offmInCooldown && (
+        {!offmPaused && !offmInCooldown && (
           <div className="game-action-row">
             <Button variant="stop" onClick={offlineMultiJilla}>Jilla (vraag overslaan)</Button>
           </div>
         )}
 
-        {!offmInCooldown && currentComboApproved && (
+        {!offmPaused && !offmInCooldown && currentComboApproved && (
           <>
             <div className="badge" style={{ background: "rgba(251,146,60,0.18)", borderColor: "rgba(251,146,60,0.35)" }}>
               Deze vraag + letter is gemarkeerd als lastig/onmogelijk.
@@ -2278,7 +2681,7 @@ function renderLetterConfirm(mode) {
           </>
         )}
 
-        {!offmInCooldown && (
+        {!offmPaused && !offmInCooldown && (
           <div className="game-action-row">
             <Button
               variant="alt"
@@ -2461,7 +2864,7 @@ function renderLetterConfirm(mode) {
           </Section>
         )}
 
-        {isOnlineRoom && room?.participants && (
+        {isOnlineRoom && room?.started && room?.participants && (
           <Section title="Spelers">
             <ul style={styles.list}>
               {(Array.isArray(room.playersOrder) ? room.playersOrder : Object.keys(room.players || {}))
@@ -2522,11 +2925,11 @@ function renderLetterConfirm(mode) {
   {isOnlineRoom
     ? (room?.solo
         ? "Solo: timer & punten actief."
-        : "Multiplayer: timer & punten actief (5s cooldown).")
+        : `Multiplayer: timer & punten actief (${Math.round(roomCooldownMs(room) / 1000)}s cooldown).`)
     : (offlineSolo
         ? "Offline solo actief."
         : (offlineMulti
-            ? "Offline multiplayer actief (5s cooldown)."
+            ? `Offline multiplayer actief (${Math.round(offmCooldownMs / 1000)}s cooldown).`
             : (online
                 ? "Maak een room of start Solo (offline)."
                 : "Offline — start Solo (offline).")))}
@@ -2544,11 +2947,24 @@ function renderLetterConfirm(mode) {
   open={settingsOpen}
   theme={theme}
   reportCount={pendingReports.length}
+  feedbackCount={openFeedbackCount}
+  notificationsSupported={typeof Notification !== "undefined"}
+  notificationsEnabled={turnNotificationsEnabled}
+  notificationPermission={notificationPermission}
   onThemeChange={setTheme}
   onOpenReports={() => {
     setSettingsOpen(false);
     setReportReviewOpen(true);
   }}
+  onOpenFeedbackForm={() => {
+    setSettingsOpen(false);
+    setFeedbackDialogOpen(true);
+  }}
+  onOpenFeedbackReports={() => {
+    setSettingsOpen(false);
+    setFeedbackReviewOpen(true);
+  }}
+  onToggleNotifications={toggleTurnNotifications}
   onOpenTutorial={() => {
     setSettingsOpen(false);
     setTutorialOpen(true);
@@ -2580,10 +2996,37 @@ function renderLetterConfirm(mode) {
         open={offmSetupOpen}
         playerCount={offmPlayerCount}
         names={offmNames}
+        cooldownSeconds={hostGameSettings.cooldownSeconds}
         onPlayerCountChange={setOffmPlayerCount}
         onNamesChange={setOffmNames}
+        onCooldownChange={updateHostCooldownSeconds}
         onStart={startOfflineMultiFromSetup}
         onClose={() => setOffmSetupOpen(false)}
+      />
+      <GameSettingsOverlay
+        open={gameSettingsOpen}
+        cooldownSeconds={roomCode && room ? Math.round(roomCooldownMs(room) / 1000) : hostGameSettings.cooldownSeconds}
+        onCooldownChange={updateHostCooldownSeconds}
+        onClose={() => setGameSettingsOpen(false)}
+      />
+      <FeedbackReportOverlay
+        open={feedbackDialogOpen}
+        type={feedbackType}
+        title={feedbackTitle}
+        message={feedbackMessage}
+        busy={feedbackBusy}
+        onTypeChange={setFeedbackType}
+        onTitleChange={setFeedbackTitle}
+        onMessageChange={setFeedbackMessage}
+        onSubmit={submitFeedbackReport}
+        onClose={() => setFeedbackDialogOpen(false)}
+      />
+      <FeedbackReportsReviewOverlay
+        open={feedbackReviewOpen}
+        reports={feedbackReportList}
+        onResolve={resolveFeedbackReport}
+        onDelete={deleteFeedbackReport}
+        onClose={() => setFeedbackReviewOpen(false)}
       />
       <ImpossibleComboReportOverlay
         open={!!reportDialog}
