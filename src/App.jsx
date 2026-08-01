@@ -1145,6 +1145,9 @@ async function toggleTurnNotifications() {
   const connIdRef = useRef(null);
   const roomUnsubRef = useRef(null); // holds onValue unsubscribe
   const turnNotificationKeyRef = useRef(null);
+  const previousTurnRef = useRef(null);
+  const pendingTurnNotificationRef = useRef(false);
+  const notificationRoomCodeRef = useRef(null);
 
   // UI toasts
   const [pofShow, setPofShow] = useState(false);
@@ -2164,14 +2167,51 @@ const matchStartedAt = isOnlineRoom
     : 0;
 
   useEffect(() => {
-    const showTurnNotification = async () => {
+    if (notificationRoomCodeRef.current !== roomCode) {
+      notificationRoomCodeRef.current = roomCode || null;
+      previousTurnRef.current = room?.turn || null;
+      pendingTurnNotificationRef.current = false;
+      turnNotificationKeyRef.current = null;
+      return;
+    }
+
+    const previousTurn = previousTurnRef.current;
+    const currentTurn = room?.turn || null;
+    const becameMyTurn = Boolean(
+      room?.started
+      && playerId
+      && currentTurn === playerId
+      && previousTurn
+      && previousTurn !== playerId
+    );
+
+    previousTurnRef.current = currentTurn;
+
+    if (currentTurn !== playerId || !room?.started) {
+      pendingTurnNotificationRef.current = false;
+      return;
+    }
+
+    if (becameMyTurn) {
+      // Alleen een echte beurtwissel mag een melding klaarzetten.
+      // De huidige beurt verbergen is dus niet genoeg.
+      pendingTurnNotificationRef.current = document.visibilityState === "hidden";
+    }
+
+    const showPendingTurnNotification = async () => {
+      if (!pendingTurnNotificationRef.current) return;
       if (!turnNotificationsEnabled || notificationPermission !== "granted") return;
       if (!roomCode || !room?.started || room?.paused || room?.phase !== "answer") return;
-      if (room?.turn !== playerId || document.visibilityState === "visible") return;
+      if (room?.turn !== playerId || document.visibilityState !== "hidden") return;
 
       const notificationKey = `${roomCode}:${room.turnStartAt ?? room.currentIndex ?? 0}:${room.turn}`;
-      if (turnNotificationKeyRef.current === notificationKey) return;
+      if (turnNotificationKeyRef.current === notificationKey) {
+        pendingTurnNotificationRef.current = false;
+        return;
+      }
+
       turnNotificationKeyRef.current = notificationKey;
+      pendingTurnNotificationRef.current = false;
 
       try {
         await showBrowserNotification("PimPamPof: jij bent aan de beurt", {
@@ -2184,13 +2224,7 @@ const matchStartedAt = isOnlineRoom
       }
     };
 
-    void showTurnNotification();
-    const handleVisibilityChange = () => { void showTurnNotification(); };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
+    void showPendingTurnNotification();
   }, [
     turnNotificationsEnabled,
     notificationPermission,
