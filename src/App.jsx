@@ -1146,6 +1146,7 @@ async function toggleTurnNotifications() {
   const roomUnsubRef = useRef(null); // holds onValue unsubscribe
   const turnNotificationKeyRef = useRef(null);
   const previousTurnRef = useRef(null);
+  const previousStartedRef = useRef(false);
   const pendingTurnNotificationRef = useRef(false);
   const notificationRoomCodeRef = useRef(null);
 
@@ -2170,31 +2171,45 @@ const matchStartedAt = isOnlineRoom
     if (notificationRoomCodeRef.current !== roomCode) {
       notificationRoomCodeRef.current = roomCode || null;
       previousTurnRef.current = room?.turn || null;
+      previousStartedRef.current = Boolean(room?.started);
       pendingTurnNotificationRef.current = false;
       turnNotificationKeyRef.current = null;
       return;
     }
 
     const previousTurn = previousTurnRef.current;
+    const wasStarted = previousStartedRef.current;
     const currentTurn = room?.turn || null;
+    const isStarted = Boolean(room?.started);
+
     const becameMyTurn = Boolean(
-      room?.started
+      isStarted
       && playerId
       && currentTurn === playerId
       && previousTurn
       && previousTurn !== playerId
     );
 
+    // Bij de eerste vraag verandert `turn` meestal niet: alleen `started` gaat
+    // van false naar true. Dit is daarom een aparte geldige notificatietrigger.
+    const startedWithMyTurn = Boolean(
+      !wasStarted
+      && isStarted
+      && playerId
+      && currentTurn === playerId
+    );
+
     previousTurnRef.current = currentTurn;
+    previousStartedRef.current = isStarted;
 
     if (currentTurn !== playerId || !room?.started) {
       pendingTurnNotificationRef.current = false;
       return;
     }
 
-    if (becameMyTurn) {
-      // Alleen een echte beurtwissel mag een melding klaarzetten.
-      // De huidige beurt verbergen is dus niet genoeg.
+    if (becameMyTurn || startedWithMyTurn) {
+      // Alleen een echte beurtwissel of het daadwerkelijk starten van de
+      // eerste vraag mag een melding klaarzetten.
       pendingTurnNotificationRef.current = document.visibilityState === "hidden";
     }
 
