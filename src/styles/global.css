@@ -20,14 +20,14 @@ body[data-theme="blue"] {
   --panel-border: rgba(147,197,253,0.22);
 }
 
-body[data-theme="orange"] {
-  --page-bg-start: #1c1917;
-  --page-bg-end: #7c2d12;
-  --accent: #ea580c;
-  --accent-dark: #9a3412;
-  --neutral: #57534e;
+body[data-theme="darkred"] {
+  --page-bg-start: #1a0d0d;
+  --page-bg-end: #5b1010;
+  --accent: #8b0000;
+  --accent-dark: #5c0000;
+  --neutral: #5a3a3a;
   --panel-bg: rgba(255,255,255,0.06);
-  --panel-border: rgba(251,146,60,0.25);
+  --panel-border: rgba(139,0,0,0.25);
 }
 
 body[data-theme="purple"] {
@@ -293,7 +293,8 @@ body {
 
 .theme-option-green .theme-preview { background: #16a34a; }
 .theme-option-blue .theme-preview { background: #2563eb; }
-.theme-option-orange .theme-preview { background: #ea580c; }
+.theme-option-darkred .theme-preview
+{ background: #8b0000; }
 .theme-option-purple .theme-preview { background: #9333ea; }
 
 .question-tabs {
