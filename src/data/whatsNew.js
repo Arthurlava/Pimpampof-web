@@ -4,6 +4,19 @@ export const WHATS_NEW = {
     {
       updatedAtLabel: "1 aug 2026",
       items: [
+        "Offline multiplayer heeft nu pauzeren, letter aanpassen en antwoorden terugdraaien.",
+        "Instelbare cooldown tussen vragen toegevoegd. De host kan deze opslaan als standaardinstelling.",
+        "Spelerslijst toegevoegd aan de online lobby zodat je ziet wie er in de room zit.",
+        "Bugreport- en feedbacksysteem toegevoegd.",
+        "Notificaties toegevoegd wanneer je weer aan de beurt bent, ook als de app op de achtergrond staat.",
+        "Klikken op een notificatie brengt je nu terug naar het actieve spel.",
+        "Bevestiging toegevoegd voordat Jilla wordt gebruikt om misclicks te voorkomen.",
+        "Diverse bugs opgelost en de stabiliteit van beurtwisselingen verbeterd.",
+      ],
+    },
+    {
+      updatedAtLabel: "1 aug 2026",
+      items: [
         "Offline multiplayer heeft nu pauzeren en hervatten.",
         "Offline multiplayer heeft nu knoppen om een verkeerde letter te corrigeren of het laatste antwoord terug te draaien.",
         "Hosts kunnen de cooldown tussen beurten instellen van 0 tot 20 seconden.",
