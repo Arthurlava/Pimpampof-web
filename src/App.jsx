@@ -97,6 +97,32 @@ function roomCooldownMs(data) {
   return Number.isFinite(configured) && configured >= 0 ? configured : COOLDOWN_MS;
 }
 
+async function showBrowserNotification(title, options = {}) {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+
+  const notificationOptions = {
+    ...options,
+    data: {
+      ...(options.data || {}),
+      url: options.data?.url || window.location.href,
+    },
+  };
+
+  if ("serviceWorker" in navigator) {
+    const baseUrl = import.meta.env.BASE_URL || "/";
+    const workerUrl = `${baseUrl}notification-sw.js`;
+    const registration = await navigator.serviceWorker.register(workerUrl, { scope: baseUrl });
+    await registration.showNotification(title, notificationOptions);
+    return;
+  }
+
+  const notification = new Notification(title, notificationOptions);
+  notification.onclick = () => {
+    window.focus();
+    notification.close();
+  };
+}
+
 /* ---------- App ---------- */
 export default function PimPamPofWeb() {
   const {
@@ -1092,6 +1118,12 @@ async function toggleTurnNotifications() {
     if (permission === "default") permission = await Notification.requestPermission();
     setNotificationPermission(permission);
     setTurnNotificationsEnabled(permission === "granted");
+    if (permission === "granted") {
+      await showBrowserNotification("PimPamPof-notificaties staan aan", {
+        body: "Je krijgt een melding wanneer je weer aan de beurt bent.",
+        tag: "pimpampof-notification-test",
+      });
+    }
   } catch (error) {
     console.warn("Kon notificatietoestemming niet aanvragen", error);
     setTurnNotificationsEnabled(false);
@@ -2132,27 +2164,33 @@ const matchStartedAt = isOnlineRoom
     : 0;
 
   useEffect(() => {
-    if (!turnNotificationsEnabled || notificationPermission !== "granted") return;
-    if (!roomCode || !room?.started || room?.paused || room?.phase !== "answer") return;
-    if (room?.turn !== playerId || document.visibilityState === "visible") return;
+    const showTurnNotification = async () => {
+      if (!turnNotificationsEnabled || notificationPermission !== "granted") return;
+      if (!roomCode || !room?.started || room?.paused || room?.phase !== "answer") return;
+      if (room?.turn !== playerId || document.visibilityState === "visible") return;
 
-    const notificationKey = `${roomCode}:${room.turnStartAt ?? room.currentIndex ?? 0}:${room.turn}`;
-    if (turnNotificationKeyRef.current === notificationKey) return;
-    turnNotificationKeyRef.current = notificationKey;
+      const notificationKey = `${roomCode}:${room.turnStartAt ?? room.currentIndex ?? 0}:${room.turn}`;
+      if (turnNotificationKeyRef.current === notificationKey) return;
+      turnNotificationKeyRef.current = notificationKey;
 
-    try {
-      const notification = new Notification("PimPamPof: jij bent aan de beurt", {
-        body: `${onlineQuestion || "De volgende vraag staat klaar."} Letter: ${room.lastLetter || "?"}`,
-        tag: `pimpampof-turn-${roomCode}`,
-      });
+      try {
+        await showBrowserNotification("PimPamPof: jij bent aan de beurt", {
+          body: `${onlineQuestion || "De volgende vraag staat klaar."} Letter: ${room.lastLetter || "?"}`,
+          tag: `pimpampof-turn-${roomCode}`,
+          requireInteraction: true,
+        });
+      } catch (error) {
+        console.warn("Kon beurtnotificatie niet tonen", error);
+      }
+    };
 
-      notification.onclick = () => {
-        window.focus();
-        notification.close();
-      };
-    } catch (error) {
-      console.warn("Kon beurtnotificatie niet tonen", error);
-    }
+    void showTurnNotification();
+    const handleVisibilityChange = () => { void showTurnNotification(); };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
   }, [
     turnNotificationsEnabled,
     notificationPermission,
@@ -2306,12 +2344,31 @@ async function confirmLetter() {
 useEffect(() => {
   if (!letterConfirm?.letter) return undefined;
 
-  const remainingMs = Math.max(0, LETTER_CONFIRM_MS - (Date.now() - (letterConfirm.startedAt || Date.now())));
-  const timeoutId = setTimeout(() => {
-    confirmLetter();
-  }, remainingMs);
+  let submitted = false;
+  const submitPendingLetter = () => {
+    if (submitted) return;
+    submitted = true;
+    void confirmLetter();
+  };
 
-  return () => clearTimeout(timeoutId);
+  const remainingMs = Math.max(0, LETTER_CONFIRM_MS - (Date.now() - (letterConfirm.startedAt || Date.now())));
+  const timeoutId = setTimeout(submitPendingLetter, remainingMs);
+
+  const handleVisibilityChange = () => {
+    // Achtergrondtabs kunnen timers pauzeren. Bevestig daarom direct voordat
+    // het spel wordt verlaten of de browser de pagina bevriest.
+    if (document.visibilityState === "hidden") submitPendingLetter();
+  };
+
+  const handlePageHide = () => submitPendingLetter();
+  document.addEventListener("visibilitychange", handleVisibilityChange);
+  window.addEventListener("pagehide", handlePageHide);
+
+  return () => {
+    clearTimeout(timeoutId);
+    document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("pagehide", handlePageHide);
+  };
   // eslint-disable-next-line react-hooks/exhaustive-deps
 }, [letterConfirm]);
 
