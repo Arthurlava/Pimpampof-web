@@ -6,7 +6,7 @@ import { styles } from "../../styles/styles";
 const THEMES = [
   { id: "green", label: "Groen" },
   { id: "blue", label: "Blauw" },
-  { id: "orange", label: "Oranje" },
+  { id: "DarkRed", label: "DarkRed" },
   { id: "purple", label: "Paars" },
 ];
 
